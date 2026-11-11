@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#04070f">
+  <title>NEON CIRCUIT | 自動攻撃ハクスラ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="battle.css">
+  <link rel="stylesheet" href="title.css">
+  <link rel="stylesheet" href="hud.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="stage" id="stage">
+      <canvas id="game" tabindex="-1" aria-label="戦闘画面。WASD または矢印キーで移動、Esc でメニュー"></canvas>
+    </div>
+
+    <div class="hud" id="hud">
+      <div class="hud-top">
+        <div class="hud-wave" aria-label="進行状況">
+          <span class="hud-wave-num" id="waveLabel">WAVE 01</span>
+          <span class="hud-round" id="roundLabel">ROUND 1 / 3</span>
+          <span class="hud-timer" id="timerLabel">00:00</span>
+        </div>
+        <div class="hud-boss" id="bossBar" hidden>
+          <span class="hud-boss-name" id="bossName"></span>
+          <div class="hud-boss-track"><i id="bossFill"></i></div>
+        </div>
+        <div class="hud-count" aria-label="敵の数と撃破数">
+          <span>敵 <strong id="enemyCount">0</strong></span>
+          <span>撃破 <strong id="killCount">0</strong></span>
+        </div>
+      </div>
+
+      <div class="transmission" id="transmission" role="status" hidden>
+        <span id="transmissionTitle"></span>
+        <p id="transmissionText"></p>
+      </div>
+
+      <div class="hud-feed" id="feed" aria-live="polite"></div>
+
+      <div class="hud-bottom">
+        <div class="hud-vitals">
+          <div class="hud-class"><span id="classTag">未選択</span><span class="hud-level" id="levelText">LV 1</span></div>
+          <div class="hud-bar hp" id="hpBar" data-low="false">
+            <div class="hud-bar-fill" id="hpFill"></div>
+            <span class="hud-bar-label">耐久値</span><span class="hud-bar-value" id="hpText">100 / 100</span>
+          </div>
+          <div class="hud-bar xp">
+            <div class="hud-bar-fill" id="xpFill"></div>
+            <span class="hud-bar-label">経験値</span><span class="hud-bar-value" id="xpText">0 / 4</span>
+          </div>
+        </div>
+        <div class="hud-skills" id="skillHud" aria-label="スキルの充填状況"></div>
+        <div class="hud-actions">
+          <div class="hud-status" id="combatStatus">自動攻撃 待機中</div>
+          <button class="hud-menu-btn" id="pauseBtn" type="button" disabled><kbd>Esc</kbd><span>メニュー</span></button>
+        </div>
+      </div>
+
+      <div id="touchPad" class="touch-pad" aria-hidden="true"><span></span></div>
+    </div>
+  </div>
+
+  <div class="command" id="command" role="dialog" aria-modal="true" aria-labelledby="commandTitle" hidden>
+    <div class="command-shell">
+      <nav class="command-nav" aria-label="メニュー">
+        <h2 class="command-title" id="commandTitle">一時停止中</h2>
+        <p class="command-run" id="commandRun"></p>
+        <button class="command-tab command-resume" type="button" data-action="resume">戦闘に戻る</button>
+        <div class="command-tabs" role="tablist" aria-orientation="vertical">
+          <button class="command-tab" type="button" role="tab" data-tab="build" aria-controls="page-build">スキル回路</button>
+          <button class="command-tab" type="button" role="tab" data-tab="settings" aria-controls="page-settings">設定</button>
+          <button class="command-tab" type="button" role="tab" data-tab="log" aria-controls="page-log">通信ログ</button>
+          <button class="command-tab" type="button" role="tab" data-tab="quit" aria-controls="page-quit">タイトルへ戻る</button>
+        </div>
+        <p class="command-hint"><kbd>Esc</kbd> 戦闘に戻る　<kbd>Q</kbd><kbd>E</kbd> タブ切替</p>
+      </nav>
+
+      <section class="command-page" id="page-build" role="tabpanel" data-page="build" aria-labelledby="buildHeading">
+        <header class="page-head">
+          <h3 id="buildHeading">スキル回路</h3>
+          <p>スキルを選んでから保有ノードを押すと接続します。各スキルに2個まで。</p>
+        </header>
+        <div class="build-stats">
+          <div><span>攻撃</span><strong id="attackStat">—</strong></div>
+          <div><span>防御</span><strong id="defenseStat">—</strong></div>
+          <div><span>速度</span><strong id="speedStat">—</strong></div>
+          <div><span>装備</span><strong id="slotCount">0 / 17</strong></div>
+        </div>
+        <div class="build-columns">
+          <div class="build-skills">
+            <h4>実行中のスキル</h4>
+            <div id="skillList" class="skill-list"></div>
+          </div>
+          <div class="build-nodes">
+            <h4>保有ノード</h4>
+            <div id="nodeList" class="node-list"></div>
+            <p class="build-hint" id="buildHint" role="status">ノードはレベルアップで手に入ります。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="command-page" id="page-settings" role="tabpanel" data-page="settings" aria-labelledby="settingsHeading" hidden>
+        <header class="page-head">
+          <h3 id="settingsHeading">設定</h3>
+          <p>変更はすぐに反映され、次回の起動でも引き継がれます。</p>
+        </header>
+        <div class="settings-group">
+          <h4>サウンド</h4>
+          <div class="setting-row"><span class="setting-label" id="lblMusic">BGM</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblMusic" data-setting="music"></button></div>
+          <div class="setting-row"><span class="setting-label" id="lblSfx">効果音</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblSfx" data-setting="sfx"></button></div>
+        </div>
+        <div class="settings-group settings-graphics">
+          <h4>グラフィック</h4>
+          <div class="setting-row">
+            <span class="setting-label" id="lblQuality">画質<small>重いと感じたら下げてください</small></span>
+            <div class="segmented" role="radiogroup" aria-labelledby="lblQuality" data-setting="quality">
+              <button type="button" role="radio" data-value="low">低</button>
+              <button type="button" role="radio" data-value="medium">中</button>
+              <button type="button" role="radio" data-value="high">高</button>
+            </div>
+          </div>
+          <div class="setting-row"><span class="setting-label" id="lblBloom">発光エフェクト</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblBloom" data-setting="bloom"></button></div>
+        </div>
+        <div class="settings-group">
+          <h4>表示</h4>
+          <div class="setting-row"><span class="setting-label" id="lblNumbers">ダメージ数値</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblNumbers" data-setting="damageNumbers"></button></div>
+          <div class="setting-row"><span class="setting-label" id="lblShake">画面の揺れ</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblShake" data-setting="shake"></button></div>
+          <div class="setting-row"><span class="setting-label" id="lblFollow">カメラ追従<small>オフにすると戦場全体を映します</small></span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblFollow" data-setting="follow"></button></div>
+        </div>
+      </section>
+
+      <section class="command-page" id="page-log" role="tabpanel" data-page="log" aria-labelledby="logHeading" hidden>
+        <header class="page-head">
+          <h3 id="logHeading">通信ログ</h3>
+          <p>軌道施設アーク救出作戦で受信した通信です。</p>
+        </header>
+        <div class="mission-log" id="missionLog" tabindex="0"></div>
+      </section>
+
+      <section class="command-page" id="page-quit" role="tabpanel" data-page="quit" aria-labelledby="quitHeading" hidden>
+        <header class="page-head">
+          <h3 id="quitHeading">タイトルへ戻る</h3>
+          <p>今回の出撃は記録されません。戻りますか。</p>
+        </header>
+        <div class="quit-actions">
+          <button class="primary-action" type="button" id="quitConfirm">タイトルへ戻る</button>
+          <button class="primary-action secondary-action" type="button" data-action="resume">戦闘を続ける</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overlayTitle">
+    <div id="overlayPanel" class="overlay-panel"></div>
+  </div>
+  <div id="titleRoot" class="title-root" hidden></div>
+  <script src="vendor/three.bundle.js"></script>
+  <script src="vendor/arena-texture.js"></script>
+  <script src="vendor/models.js" onerror="window.NEON_MODELS=null"></script>
+  <script src="mission.js"></script>
+  <script src="sound.js"></script>
+  <script src="effects.js"></script>
+  <script src="render3d.js"></script>
+  <script src="title.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+* text=auto
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.txt text eol=lf
+vendor/three.bundle.js -whitespace
+assets/fonts/OFL-*.txt -whitespace
+assets/movie/*.mp4 filter=lfs diff=lfs merge=lfs -text
+assets/audio/*.wav filter=lfs diff=lfs merge=lfs -text
+assets/audio/*.mp3 filter=lfs diff=lfs merge=lfs -text
+vendor/models.js filter=lfs diff=lfs merge=lfs -text
