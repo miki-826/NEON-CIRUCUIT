@@ -32,3 +32,9 @@ python -m http.server 8000 --bind 127.0.0.1 --directory dist
 - Git連携後はブランチのPreviewで確認し、PRレビュー後にmainへマージする運用にします。Production Branchはmainです。
 - 動画や音楽の配信量はVercelの利用量に影響します。利用状況はダッシュボードで確認してください。
 - この設定の追加だけではVercelプロジェクトや公開URLは作成されません。
+
+## 変更が本番に反映されない場合
+
+- 作業ブランチへのpushは本番mainの更新ではありません。PRをmainへマージし、VercelのProductionデプロイがそのコミットで成功していることを確認します。作業ブランチはPreviewで確認します。
+- Vercel側でProduction Branchを変更している場合は、そのブランチがデプロイ対象です。
+- `tools/build-static.mjs`は公開ファイルを明示的にコピーします。新しいJS/CSSを追加したらentriesにも追加し、`node tools/build-static.mjs`でdistを生成してください。生成後はindex.htmlのローカル参照がdist内に存在するか検証し、コピー漏れをビルドエラーにします。
