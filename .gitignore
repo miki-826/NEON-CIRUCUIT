@@ -5,6 +5,8 @@ desktop.ini
 .env.*
 !.env.example
 node_modules/
+dist/
+.vercel/
 .venv/
 venv/
 __pycache__/

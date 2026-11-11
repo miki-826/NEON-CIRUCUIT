@@ -9,7 +9,7 @@ const errors = [];
 async function walk(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (['.git', 'node_modules', 'out', 'preview', '__pycache__'].includes(entry.name)) continue;
+    if (['.git', '.vercel', 'dist', 'node_modules', 'out', 'preview', '__pycache__'].includes(entry.name)) continue;
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...await walk(path));
     else files.push(path);

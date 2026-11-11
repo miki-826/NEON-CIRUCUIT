@@ -90,3 +90,7 @@ python -m pip install -r tools/requirements.txt
 ## 素材とライセンス
 
 three.jsのMITライセンスとフォントのOFL文書を同梱しています。提供曲や動画を含む素材の出典・利用条件は [素材一覧](docs/ASSETS.md) を確認してください。独自コードと素材に適用するプロジェクト全体のライセンスは未設定です。
+
+## Vercelで公開
+
+Vercelに対応しています。Git LFSの有効化が必要です。設定と公開手順は [Vercel公開ガイド](docs/VERCEL.md) を参照してください。
