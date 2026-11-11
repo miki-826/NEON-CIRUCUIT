@@ -85,7 +85,7 @@
       <section class="command-page" id="page-build" role="tabpanel" data-page="build" aria-labelledby="buildHeading">
         <header class="page-head">
           <h3 id="buildHeading">スキル回路</h3>
-          <p>ブロックをつないでスキル回路を組み立てます。条件の中へ分岐を置いたり、途中からまとめて移動できます。</p>
+          <p>強化ノードをスキルの下へつなぐほど、チェインボーナスで性能が上昇。増幅ノードの順番を工夫して、自分だけの強力なスキルを作ろう。</p>
         </header>
         <div class="build-stats">
           <div><span>攻撃</span><strong id="attackStat">—</strong></div>
@@ -94,20 +94,7 @@
           <div><span>装備</span><strong id="slotCount">0 / 17</strong></div>
         </div>
         <div id="circuitEditor"></div>
-        <details class="circuit-equipment">
-          <summary>現在の戦闘装備・強化ノード（戦闘に反映）</summary>
-          <div class="build-columns">
-            <div class="build-skills">
-              <h4>実行中のスキル</h4>
-              <div id="skillList" class="skill-list"></div>
-            </div>
-            <div class="build-nodes">
-              <h4>保有ノード</h4>
-              <div id="nodeList" class="node-list"></div>
-              <p class="build-hint" id="buildHint" role="status">ノードはレベルアップで手に入ります。</p>
-            </div>
-          </div>
-        </details>
+        <div hidden aria-hidden="true"><div id="skillList"></div><div id="nodeList"></div><p id="buildHint"></p></div>
       </section>
 
       <section class="command-page" id="page-settings" role="tabpanel" data-page="settings" aria-labelledby="settingsHeading" hidden>

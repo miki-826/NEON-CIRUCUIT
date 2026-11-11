@@ -1,320 +1,164 @@
 (() => {
   'use strict';
   const api = window.NeonCircuit;
-  const {definitions, ports, parentOf, descendants, GraphStore} = api;
-  const kindNames = {event:'イベント', condition:'条件', action:'アクション'};
-  const portNames = {then:'なら', else:'でなければ', next:'次へ'};
-  const statNames = {attack:'攻撃', defense:'防御', speed:'速度'};
-  function element(tag, className, text) {
-    const el = document.createElement(tag); el.className = className || '';
-    if (text !== undefined) el.textContent = text;
-    return el;
-  }
-  function button(label, handler, className = '') {
-    const el = element('button', className, label); el.type = 'button';
-    if (handler) el.addEventListener('click',handler);
-    return el;
-  }
-  class CircuitEditor {
-    constructor(host, skills = [], catalog = skills) {
-      this.host = host; this.skills = skills; this.catalog = catalog; this.store = new GraphStore();
-      this.selected = null; this.drag = null; this.zoom = 1; this.pendingDelete = null;
+  const categories = {damage:'火力',stat:'ステータス',projectile:'弾道・特殊効果',special:'特殊効果',amplifier:'増幅',amplify:'増幅',utility:'補助'};
+  const el = (tag, cls = '', text) => { const r = document.createElement(tag); r.className = cls; if (text !== undefined) r.textContent = text; return r; };
+  const button = (text, fn, cls = '') => { const r = el('button',cls,text); r.type = 'button'; if (fn) r.addEventListener('click',fn); return r; };
+  const fmt = v => Number.isFinite(v) ? new Intl.NumberFormat('ja-JP',{maximumFractionDigits:2}).format(v) : '—';
+  class UpgradeEditor {
+    constructor(host, options) {
+      this.host=host; this.options=options; this.selectedSkill=null; this.selectedUid=null; this.zoom=1; this.floating=[]; this.history=[]; this.future=[]; this.drag=null;
       host.classList.add('circuit-editor');
-      const toolbar = element('div','circuit-toolbar');
-      this.undoButton = button('↶ 元に戻す', () => this.run(() => this.store.undo()));
-      this.redoButton = button('↷ やり直す', () => this.run(() => this.store.redo()));
-      this.zoomOut = button('−', () => this.setZoom(this.zoom - .1)); this.zoomOut.setAttribute('aria-label','縮小');
-      this.zoomLabel = element('output','','100%');
-      this.zoomIn = button('＋', () => this.setZoom(this.zoom + .1)); this.zoomIn.setAttribute('aria-label','拡大');
-      toolbar.append(this.undoButton, this.redoButton, element('span','circuit-toolbar-spacer'), this.zoomOut, this.zoomLabel, this.zoomIn);
-      const note = element('p','circuit-stage-note','回路エディター（プレビュー） · この回路はまだ戦闘に適用されません。現在の自動発動は下の装備設定で調整できます。');
-      const body = element('div','circuit-body');
-      this.palette = element('aside','circuit-palette'); this.palette.setAttribute('aria-label','ブロックパレット');
-      for (const kind of ['event','condition','action']) {
-        this.palette.append(element('h4','',kindNames[kind]));
-        for (const [type,def] of Object.entries(definitions).filter(([,def]) => def.kind === kind)) {
-          const add = button('＋ ' + def.label, event => { if (event.detail === 0) this.add(type); },`circuit-palette-block kind-${kind}`);
-          add.dataset.add = type; add.title = 'ドラッグして配置、またはEnterで追加'; this.palette.append(add);
-        }
-      }
-      this.viewport = element('div','circuit-viewport'); this.viewport.tabIndex = 0;
-      this.viewport.setAttribute('aria-label','回路ワークスペース。ブロックを選択して設定欄から接続できます。');
-      this.sizer = element('div','circuit-sizer'); this.surface = element('div','circuit-surface');
-      this.sizer.append(this.surface); this.viewport.append(this.sizer);
-      this.inspector = element('aside','circuit-inspector'); this.inspector.setAttribute('aria-label','選択ブロックの設定');
-      body.append(this.palette, this.viewport, this.inspector);
-      this.status = element('p','circuit-status'); this.status.setAttribute('role','status'); this.status.setAttribute('aria-live','polite');
-      host.append(toolbar, note, body, this.status);
-      this.onDown = event => this.pointerDown(event);
-      this.onMove = event => this.pointerMove(event);
-      this.onUp = event => this.pointerUp(event);
-      this.onCancel = () => this.cancelDrag();
-      this.onKey = event => this.keydown(event);
-      host.addEventListener('pointerdown',this.onDown);
-      host.addEventListener('pointermove',this.onMove);
-      host.addEventListener('pointerup',this.onUp);
-      host.addEventListener('pointercancel',this.onCancel);
-      host.addEventListener('lostpointercapture',this.onCancel);
-      host.addEventListener('keydown',this.onKey);
-      window.addEventListener('blur',this.onCancel);
-      this.reset(skills);
+      const toolbar=el('div','circuit-toolbar'), title=el('div','circuit-toolbar-title');
+      title.append(el('span','circuit-live-dot'),el('strong','','SKILL FORGE'),el('span','circuit-live-label','戦闘に即反映'));
+      this.undoButton=button('↶',()=>this.undo()); this.undoButton.setAttribute('aria-label','元に戻す');
+      this.redoButton=button('↷',()=>this.redo()); this.redoButton.setAttribute('aria-label','やり直す');
+      this.zoomLabel=el('output','','100%'); const smaller=button('−',()=>this.setZoom(this.zoom-.1)), larger=button('＋',()=>this.setZoom(this.zoom+.1));
+      smaller.setAttribute('aria-label','縮小'); larger.setAttribute('aria-label','拡大'); toolbar.append(title,this.undoButton,this.redoButton,smaller,this.zoomLabel,larger);
+      const body=el('div','circuit-body'); this.palette=el('aside','circuit-palette'); this.palette.setAttribute('aria-label','所持強化ノード');
+      this.workspace=el('section','circuit-workspace'); const head=el('div','circuit-workspace-head'); head.append(el('strong','','ビルドワークスペース'),el('span','','ベーススキルの下へ、ガチャンと接続'));
+      this.viewport=el('div','circuit-viewport'); this.viewport.tabIndex=0; this.viewport.setAttribute('aria-label','スキル強化ワークスペース');
+      this.sizer=el('div','circuit-sizer'); this.surface=el('div','circuit-surface'); this.sizer.append(this.surface); this.viewport.append(this.sizer); this.workspace.append(head,this.viewport);
+      this.inspector=el('aside','circuit-inspector'); this.inspector.setAttribute('aria-label','最終ステータス'); body.append(this.palette,this.workspace,this.inspector);
+      this.status=el('p','circuit-status','所持ノードをスキルの下にドラッグ。途中をつかむと、それ以降も一緒に動きます。'); this.status.setAttribute('role','status'); this.status.setAttribute('aria-live','polite'); host.append(toolbar,body,this.status);
+      this.handlers={pointerdown:e=>this.pointerDown(e),pointermove:e=>this.pointerMove(e),pointerup:e=>this.pointerUp(e),pointercancel:()=>this.cancelDrag(),lostpointercapture:()=>this.cancelDrag(),keydown:e=>this.keydown(e)};
+      Object.entries(this.handlers).forEach(([type,fn])=>host.addEventListener(type,fn)); this.onBlur=()=>this.cancelDrag(); window.addEventListener('blur',this.onBlur); this.refresh(true);
     }
-    announce(message) { this.status.textContent = message; }
-    run(operation, message = '') {
-      const active = document.activeElement, param = active?.dataset.param;
-      try {
-        operation(); this.pendingDelete = null; this.render();
-        if (active && !active.isConnected) {
-          const next = param ? this.inspector.querySelector(`[data-param="${param}"]`) : this.surface.querySelector(`[data-drag="${this.selected}"]`);
-          (next || this.viewport).focus({preventScroll:true});
-        }
-        if (message) this.announce(message);
-      }
-      catch (error) { this.announce(error.message); }
+    state(){return this.options.getState();}
+    definition(node){return api.nodeDefinitions.find(d=>d.id===node.id)||node;}
+    announce(text){this.status.textContent=text;}
+    allNodes(){const {builds,inventory}=this.state();return [...inventory,...builds.flatMap(s=>s.nodes)];}
+    source(uid){
+      const {builds,inventory}=this.state();
+      for(const s of builds){const i=s.nodes.findIndex(n=>n.uid===uid);if(i>=0)return {kind:'skill',skillId:s.id,uid,nodes:s.nodes.slice(i)};}
+      const group=this.floating.find(g=>g.uids.includes(uid));
+      if(group){const uids=group.uids.slice(group.uids.indexOf(uid));return {kind:'inventory',uid,uids,nodes:uids.map(id=>inventory.find(n=>n.uid===id)).filter(Boolean)};}
+      const node=inventory.find(n=>n.uid===uid);return node?{kind:'inventory',uid,nodes:[node]}:null;
     }
-    reset(skills) {
-      this.cancelDrag(); this.skills = skills; this.store = new GraphStore(); this.selected = null;
-      skills.filter(skill => skill.cost > 0).forEach((skill,index) => {
-        const root = this.store.add('event.skillReady',{x:35 + index % 2 * 320, y:40 + Math.floor(index / 2) * 300},{skillId:skill.id});
-        this.store.add('action.castSkill',{x:0,y:0},{skillId:skill.id},{id:root,port:'next'});
+    snapshot(){const {builds,inventory}=this.state();return {skills:builds.map(s=>({id:s.id,nodes:[...s.nodes]})),inventory:[...inventory],floating:structuredClone(this.floating)};}
+    restore(snapshot){const {builds,inventory}=this.state();for(const s of builds){const old=snapshot.skills.find(o=>o.id===s.id);if(old)s.nodes.splice(0,s.nodes.length,...old.nodes);}inventory.splice(0,inventory.length,...snapshot.inventory);this.floating=structuredClone(snapshot.floating);this.options.onChange?.();this.refresh(true);}
+    undo(){if(this.history.length){this.future.push(this.snapshot());this.restore(this.history.pop());this.announce('接続を元に戻しました。');}}
+    redo(){if(this.future.length){this.history.push(this.snapshot());this.restore(this.future.pop());this.announce('接続をやり直しました。');}}
+    transfer(source,target,position){
+      if(!source?.nodes.length)return;
+      const before=this.snapshot(),uids=source.nodes.map(n=>n.uid),{builds,inventory}=this.state();
+      try{
+        if(!(source.kind==='inventory'&&target.kind==='inventory'))api.transferTail(builds,inventory,source,target);
+        this.floating=this.floating.map(g=>({...g,uids:g.uids.filter(id=>!uids.includes(id))})).filter(g=>g.uids.length);
+        if(position)this.floating.push({id:crypto.randomUUID(),uids,x:position.x,y:position.y});
+        this.history.push(before);if(this.history.length>50)this.history.shift();this.future=[];this.selectedUid=uids[0];if(target.kind==='skill')this.selectedSkill=target.skillId;
+        this.options.onChange?.();this.refresh(true);this.announce(target.kind==='skill'?`${source.nodes.length}個のノードを接続。戦闘性能に反映しました。`:position?'スタックを分離しました。未接続ノードは戦闘に影響しません。':'ノードをパレットへ戻しました。');
+      }catch(error){this.announce(error.message);}
+    }
+    reset(){this.cancelDrag();this.floating=[];this.history=[];this.future=[];this.selectedSkill=null;this.selectedUid=null;this.ownership=null;this.refresh(true);}
+    refresh(force=false){
+      const {builds,inventory,context={}}=this.state(),ownership=this.allNodes().map(n=>n.uid).sort().join('|');
+      if(this.ownership!=null&&ownership!==this.ownership){this.history=[];this.future=[];}this.ownership=ownership;
+      const available=new Set(inventory.map(n=>n.uid));this.floating=this.floating.map(g=>({...g,uids:g.uids.filter(id=>available.has(id))})).filter(g=>g.uids.length);
+      if(!builds.some(s=>s.id===this.selectedSkill))this.selectedSkill=builds[0]?.id||null;
+      if(!this.allNodes().some(n=>n.uid===this.selectedUid))this.selectedUid=null;
+      const stamp=JSON.stringify({skills:builds.map(s=>[s.id,s.rank,s.nodes.map(n=>[n.uid,n.id])]),inventory:inventory.map(n=>[n.uid,n.id]),context,floating:this.floating});
+      if(!force&&stamp===this.stamp)return;this.stamp=stamp;if(this.drag)this.cancelDrag();
+      const active=document.activeElement,restore=this.host.contains(active)&&!this.palette.contains(active)&&!active.closest('.circuit-toolbar');
+      this.renderPalette();this.renderWorkspace();this.renderInspector();this.undoButton.disabled=!this.history.length;this.redoButton.disabled=!this.future.length;
+      if(restore&&!active.isConnected)(this.surface.querySelector(`[data-node-uid="${this.selectedUid}"]`)||this.surface.querySelector(`[data-base="${this.selectedSkill}"]`)||this.viewport).focus({preventScroll:true});
+    }
+    selectSkill(id){this.selectedSkill=id;this.selectedUid=null;this.refresh(true);}
+    selectNode(uid){this.selectedUid=uid;const source=this.source(uid);if(source?.kind==='skill')this.selectedSkill=source.skillId;this.host.querySelectorAll('[data-node-uid]').forEach(n=>n.classList.toggle('is-selected',n.dataset.nodeUid===uid));this.surface.querySelectorAll('[data-base]').forEach(n=>n.classList.toggle('is-selected',n.dataset.base===this.selectedSkill));this.renderInspector();}
+    renderNode(node,palette=false){
+      const def=this.definition(node),r=button('',e=>{if(e.detail===0)this.selectNode(node.uid);},`upgrade-node${palette?' palette-node':''}${this.selectedUid===node.uid?' is-selected':''}`);
+      r.dataset.nodeUid=node.uid;r.style.setProperty('--node-color',def.color||'#64d6ff');r.setAttribute('aria-label',`${def.name}。${def.desc}。選択して接続先を指定できます。`);
+      r.append(el('span','node-category',categories[def.category]||def.category||'強化'),el('strong','',def.name),el('span','node-description',def.desc));return r;
+    }
+    renderPalette(){
+      const {inventory}=this.state(),floating=new Set(this.floating.flatMap(g=>g.uids));this.palette.replaceChildren(el('h4','','NODE PALETTE'),el('p','palette-count',`未接続 ${inventory.length}個`));
+      this.palette.append(el('p','circuit-help','所持ノードをドラッグ、または選択して接続。ここへ戻すと強化を解除します。'));
+      const nodes=inventory.filter(n=>!floating.has(n.uid)),groups=[...new Set(nodes.map(n=>this.definition(n).category||'強化'))];
+      for(const category of groups){this.palette.append(el('h5','',categories[category]||category));nodes.filter(n=>(this.definition(n).category||'強化')===category).forEach(n=>this.palette.append(this.renderNode(n,true)));}
+      if(!inventory.length)this.palette.append(el('p','circuit-empty','すべて接続中です。レベルアップでノードを獲得できます。'));else if(!nodes.length)this.palette.append(el('p','circuit-help','未接続ノードはワークスペースの分離スタックにあります。'));
+    }
+    renderSlot(skill,afterUid,terminal=false){
+      const r=button(terminal?'＋ ノードを接続':'接続',()=>{const src=this.source(this.selectedUid);if(!src){this.announce('パレットまたはスタックのノードを先に選択してください。');return;}this.transfer(src,{kind:'skill',skillId:skill.id,afterUid});},`circuit-snap-slot${terminal?' terminal-slot':''}`);
+      r.dataset.targetSkill=skill.id;r.dataset.after=afterUid||'';r.setAttribute('aria-label',`${skill.name}の${afterUid?'このノードの後ろ':'先頭'}へ選択ノードを接続`);return r;
+    }
+    renderWorkspace(){
+      const {builds,inventory,context={}}=this.state();this.surface.replaceChildren();
+      builds.forEach((skill,index)=>{
+        const stack=el('div','circuit-stack live-stack');stack.dataset.skill=skill.id;stack.style.left=`${28+index*296}px`;stack.style.top='28px';
+        const base=button('',()=>this.selectSkill(skill.id),`base-skill${this.selectedSkill===skill.id?' is-selected':''}`);base.dataset.base=skill.id;
+        base.append(el('span','base-label','BASE SKILL · FIXED'),el('strong','',skill.name),el('span','',`Lv.${skill.rank} · ${skill.nodes.length} CHAIN`));stack.append(base);
+        const chain=el('div','circuit-chain');chain.append(this.renderSlot(skill,null,!skill.nodes.length));
+        skill.nodes.forEach((node,i)=>chain.append(this.renderNode(node),this.renderSlot(skill,node.uid,i===skill.nodes.length-1)));stack.append(chain);
+        const stats=api.compileSkill(skill,context);stack.append(el('div','stack-chain-bonus',`${stats.chainCount} CHAIN / 効果量 +${fmt((stats.chainMultiplier-1)*100)}%`));this.surface.append(stack);
       });
-      this.store.past = []; this.store.future = []; this.pendingDelete = null;
-      this.render(); this.announce('パレットからドラッグするか、Enterで追加してください。');
+      for(const group of this.floating){const stack=el('div','circuit-stack floating-stack');stack.dataset.floating=group.id;stack.style.left=`${group.x}px`;stack.style.top=`${group.y}px`;stack.append(el('span','floating-label','未接続 · 強化は通っていません'));group.uids.forEach(uid=>{const n=inventory.find(n=>n.uid===uid);if(n)stack.append(this.renderNode(n));});this.surface.append(stack);}
+      if(!builds.length)this.surface.append(el('p','circuit-empty','出撃すると、ベーススキルがここに表示されます。'));this.resizeSurface();
     }
-    setSkills(skills) { this.skills = skills; this.render(); }
-    labelValue(value) { return this.catalog.find(skill => skill.id === value)?.name || statNames[value] || String(value); }
-    summary(node) {
-      return Object.entries(node.params).map(([key,value]) => {
-        if (key === 'probability' || key === 'threshold') return `${Math.round(value*100)}%`;
-        if (key === 'radius') return `半径 ${value}`;
-        if (key === 'duration') return `${value}秒`;
-        if (key === 'multiplier') return `×${value}`;
-        return this.labelValue(value);
-      }).join(' · ');
-    }
-    renderNode(id) {
-      const node = this.store.document.nodes[id], def = definitions[node.type];
-      const block = element('div',`circuit-block kind-${def.kind}${this.selected === id ? ' is-selected' : ''}`);
-      block.dataset.id = id;
-      const head = button('',event => { if (event.detail === 0) this.select(id); },'circuit-block-head');
-      head.dataset.drag = id; head.setAttribute('aria-pressed',String(this.selected === id));
-      head.setAttribute('aria-label',`${kindNames[def.kind]}: ${def.label} ${this.summary(node)}`);
-      head.append(element('span','circuit-kind',kindNames[def.kind]),element('strong','',def.label));
-      if (Object.keys(node.params).length) head.append(element('span','circuit-param',this.summary(node)));
-      block.append(head);
-      if (def.kind === 'condition') {
-        for (const port of ['then','else']) {
-          const branch = element('div','circuit-branch');
-          branch.append(element('span','circuit-branch-label',port === 'then' ? 'なら' : 'でなければ'));
-          branch.append(node.links[port] ? this.renderNode(node.links[port]) : this.renderPort(id,port));
-          block.append(branch);
-        }
+    resizeSurface(){let w=620,h=480;[...this.surface.children].forEach(s=>{w=Math.max(w,s.offsetLeft+s.offsetWidth+60);h=Math.max(h,s.offsetTop+s.offsetHeight+100);});this.surface.style.width=`${w}px`;this.surface.style.height=`${h}px`;this.surface.style.transform=`scale(${this.zoom})`;this.sizer.style.width=`${w*this.zoom}px`;this.sizer.style.height=`${h*this.zoom}px`;}
+    renderInspector(){
+      const {builds,context={}}=this.state(),skill=builds.find(s=>s.id===this.selectedSkill);this.inspector.replaceChildren(el('h4','','FINAL STATUS'));if(!skill){this.inspector.append(el('p','circuit-help','スキルを選択してください。'));return;}
+      this.inspector.append(el('strong','preview-skill-name',skill.name));const stats=api.compileSkill(skill,context),base=api.compileSkill({...skill,nodes:[]},context),bonus=el('div','preview-chain');bonus.append(el('strong','',`${stats.chainCount} CHAIN`),el('span','',`全ノードの効果量 +${fmt((stats.chainMultiplier-1)*100)}%`));this.inspector.append(bonus);
+      const values=[],add=(label,key,unit='',calculate=null)=>values.push([label,calculate?calculate(base):base[key],calculate?calculate(stats):stats[key],unit]);
+      if(stats.damage>0)add('スキル威力','damage');
+      if(['pulse','volley','seeker'].includes(skill.id)){add('発射数','projectileCount','発');add('弾速','projectileSpeed');add('貫通数','pierce','体');}
+      if(skill.id==='arc')add('最大連鎖数',null,'体',s=>3+s.bonusProjectiles);
+      if(skill.id==='orbit')add('ブレード数',null,'枚',s=>Math.min(32,2+skill.rank+s.bonusProjectiles));
+      if(stats.cooldown>0)add('発動間隔','cooldown','秒');
+      if(stats.radius>0)add(skill.id==='beam'?'ビーム幅':'効果半径','radius');
+      if(['orbital','beam','arc','magnet'].includes(skill.id))add('射程','range');
+      if(skill.id==='repair'){
+        add('最大HPからの回復',null,'%',s=>Math.min(100,(.18+(skill.rank-1)*.04)*s.utilityPower*100));
+        if(context.maxHp)add('回復量（HP上限まで）',null,'',s=>Math.min(context.maxHp,context.maxHp*(.18+(skill.rank-1)*.04)*s.utilityPower));
       }
-      block.append(node.links.next ? this.renderNode(node.links.next) : this.renderPort(id,'next'));
-      return block;
+      if(skill.id==='dash'){add('移動距離',null,'',s=>130*s.utilityPower);add('無敵時間',null,'秒',s=>Math.min(3,.55*s.utilityPower));}
+      if(skill.id==='aegis')add('防御持続',null,'秒',s=>(2+(skill.rank-1)*.15)*s.utilityPower);
+      if(skill.id==='barrier')add('ダメージ軽減',null,'%',s=>Math.min(.9,.27*s.utilityPower)*100);
+      if(skill.id==='haste'){add('移動速度UP',null,'%',s=>18*s.utilityPower);add('充填速度UP',null,'%',s=>25*s.utilityPower);if(context.baseMoveSpeed)add('移動速度',null,'',s=>context.baseMoveSpeed*(1+.18*s.utilityPower));}
+      if(skill.id==='frost')add('スロウ持続',null,'秒',s=>(1.6+(skill.rank-1)*.12)*s.utilityPower);
+      if(skill.id==='magnet')add('引き寄せ率',null,'%',s=>Math.min(.9,.43*s.utilityPower)*100);
+      if(stats.cost>0)add('消費コスト','cost');
+      const metrics=el('dl','preview-metrics');
+      for(const [label,before,after,unit]of values){const row=el('div','preview-metric');row.append(el('dt','',label));const value=el('dd');value.append(el('small','',fmt(before)),el('span','metric-arrow','→'),el('strong','',fmt(after)+unit));row.append(value);metrics.append(row);}
+      this.inspector.append(metrics,el('h5','','特殊効果'),el('p','preview-effects',stats.effects?.length?stats.effects.join(' / '):'追加効果なし'),el('h5','','ノード操作'));
+      const source=this.source(this.selectedUid);if(!source){this.inspector.append(el('p','circuit-help','ノードを選ぶと、接続先の指定や分離ができます。'));return;}
+      this.inspector.append(el('p','selected-node-name',`${this.definition(source.nodes[0]).name}${source.nodes.length>1?` 以下 ${source.nodes.length}個`:''}`));const targets=el('select');targets.setAttribute('aria-label','ノードの接続先');const moved=new Set(source.nodes.map(n=>n.uid));
+      for(const target of builds){const reason=source.nodes.map(n=>api.compatibilityReason?.(target,n)||'').find(Boolean),first=el('option','',`${target.name}の先頭${reason?`（${reason}）`:''}`);first.value=`${target.id}:`;first.disabled=!!reason;targets.append(first);target.nodes.forEach(n=>{if(moved.has(n.uid))return;const option=el('option','',`${target.name} / ${this.definition(n).name}の後ろ`);option.value=`${target.id}:${n.uid}`;option.disabled=!!reason;targets.append(option);});}
+      const preferred=`${skill.id}:${skill.nodes.at(-1)?.uid||''}`;if([...targets.options].some(o=>o.value===preferred&&!o.disabled))targets.value=preferred;const enabled=[...targets.options].find(o=>!o.disabled);if(!targets.selectedOptions[0]||targets.selectedOptions[0].disabled)targets.value=enabled?.value||'';
+      const connect=button('選んだ場所へ接続',()=>{const [id,after]=targets.value.split(':');if(id)this.transfer(this.source(this.selectedUid),{kind:'skill',skillId:id,afterUid:after||null});});connect.disabled=!enabled;
+      const detach=button('ここから下をパレットへ戻す',()=>this.transfer(this.source(this.selectedUid),{kind:'inventory'}));
+      detach.disabled=source.kind==='inventory'&&!this.floating.some(group=>group.uids.includes(source.uid));
+      this.inspector.append(targets,connect,detach);
     }
-    renderPort(id, port) {
-      const el = button('＋ ここにつなぐ',() => {
-        if (!this.selected) { this.announce('先に接続するブロックを選択してください。'); return; }
-        this.run(() => this.store.connect(this.selected,id,port),'ブロックを接続しました。');
-      },'circuit-port');
-      el.dataset.target = id; el.dataset.port = port;
-      el.setAttribute('aria-label',`${definitions[this.store.document.nodes[id].type].label}の「${portNames[port]}」へ選択ブロックを接続`);
-      return el;
-    }
-    render() {
-      const doc = this.store.document;
-      if (!doc.nodes[this.selected]) this.selected = null;
-      this.surface.replaceChildren();
-      for (const id of doc.roots) {
-        const root = this.renderNode(id), p = doc.layout.rootPositions[id];
-        root.classList.add('circuit-root'); root.style.left = `${p.x}px`; root.style.top = `${p.y}px`;
-        this.surface.append(root);
+    setZoom(v){this.zoom=Math.max(.5,Math.min(1.5,Math.round(v*10)/10));this.zoomLabel.textContent=`${Math.round(this.zoom*100)}%`;this.resizeSurface();}
+    pointerDown(e){if(e.button!==0||this.drag)return;const n=e.target.closest('[data-node-uid]');if(!n)return;const source=this.source(n.dataset.nodeUid);if(!source)return;this.selectNode(n.dataset.nodeUid);const r=n.getBoundingClientRect();this.drag={source,pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,offsetX:e.clientX-r.left,offsetY:e.clientY-r.top,scale:this.palette.contains(n)?1:this.zoom,moved:false,candidate:null};this.host.setPointerCapture(e.pointerId);}
+    pointerMove(e){
+      const d=this.drag;if(!d||d.pointerId!==e.pointerId)return;if(!d.moved&&Math.hypot(e.clientX-d.startX,e.clientY-d.startY)<6)return;e.preventDefault();
+      if(!d.moved){d.moved=true;d.ghost=el('div','circuit-drag-ghost');d.ghost.inert=true;d.ghost.setAttribute('aria-hidden','true');d.source.nodes.forEach(n=>d.ghost.append(this.renderNode(n)));d.ghost.style.transform=`scale(${d.scale})`;document.body.append(d.ghost);const moved=new Set(d.source.nodes.map(n=>n.uid));this.host.querySelectorAll('[data-node-uid]').forEach(n=>{if(moved.has(n.dataset.nodeUid))n.classList.add('is-dragging');});}
+      d.ghost.style.left=`${e.clientX-d.offsetX}px`;d.ghost.style.top=`${e.clientY-d.offsetY}px`;const v=this.viewport.getBoundingClientRect();
+      if(e.clientX>=v.left-20&&e.clientX<=v.right+20&&e.clientY>=v.top-20&&e.clientY<=v.bottom+20){
+        if(e.clientY<v.top+40)this.viewport.scrollTop-=10;else if(e.clientY>v.bottom-40)this.viewport.scrollTop+=10;
+        if(e.clientX<v.left+40)this.viewport.scrollLeft-=12;else if(e.clientX>v.right-40)this.viewport.scrollLeft+=12;
       }
-      if (!doc.roots.length) this.surface.append(element('p','circuit-empty','左のパレットから、最初のイベントを置きましょう。'));
-      this.undoButton.disabled = !this.store.past.length; this.redoButton.disabled = !this.store.future.length;
-      this.renderInspector(); this.resizeSurface();
+      this.findCandidate(e.clientX-d.offsetX,e.clientY-d.offsetY);
     }
-    resizeSurface() {
-      let width = 900, height = 600;
-      for (const root of this.surface.children) {
-        width = Math.max(width,root.offsetLeft + root.offsetWidth + 100);
-        height = Math.max(height,root.offsetTop + root.offsetHeight + 100);
-      }
-      this.surface.style.width = `${width}px`; this.surface.style.height = `${height}px`;
-      this.surface.style.transform = `scale(${this.zoom})`;
-      this.sizer.style.width = `${width*this.zoom}px`; this.sizer.style.height = `${height*this.zoom}px`;
+    findCandidate(x,y){
+      const d=this.drag,{builds}=this.state(),moved=new Set(d.source.nodes.map(n=>n.uid));this.host.querySelectorAll('.is-snap-target,.is-incompatible').forEach(n=>n.classList.remove('is-snap-target','is-incompatible'));d.candidate=null;d.incompatibleReason='';const v=this.viewport.getBoundingClientRect(),candidates=[];
+      this.surface.querySelectorAll('[data-target-skill]').forEach(slot=>{
+        if(moved.has(slot.dataset.after))return;const skill=builds.find(s=>s.id===slot.dataset.targetSkill),r=slot.getBoundingClientRect();
+        if(r.bottom<v.top||r.top>v.bottom||r.left<v.left||r.left>v.right)return;const distance=Math.hypot(r.left-x,r.top-y);if(distance>=38)return;
+        const incompatible=d.source.nodes.find(n=>!api.isCompatible(skill,n));
+        if(incompatible){slot.classList.add('is-incompatible');d.incompatibleReason=api.compatibilityReason(skill,incompatible);return;}
+        candidates.push({el:slot,distance,kind:'skill',skillId:skill.id,afterUid:slot.dataset.after||null});
+      });candidates.sort((a,b)=>a.distance-b.distance);if(candidates.length){d.candidate=candidates[0];d.candidate.el.classList.add('is-snap-target');}
     }
-    select(id) {
-      this.selected = id; this.pendingDelete = null;
-      this.surface.querySelectorAll('[data-id]').forEach(el => el.classList.toggle('is-selected',el.dataset.id === id));
-      this.surface.querySelectorAll('[data-drag]').forEach(el => el.setAttribute('aria-pressed',String(el.dataset.drag === id)));
-      this.renderInspector();
+    pointerUp(e){
+      const d=this.drag;if(!d||d.pointerId!==e.pointerId)return;if(!d.moved){this.cleanupDrag();return;}this.findCandidate(e.clientX-d.offsetX,e.clientY-d.offsetY);const candidate=d.candidate,v=this.viewport.getBoundingClientRect(),p=this.palette.getBoundingClientRect(),inside=r=>e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom,inView=inside(v),returning=inside(p),position={x:Math.max(0,Math.round((e.clientX-d.offsetX-v.left+this.viewport.scrollLeft)/this.zoom)),y:Math.max(0,Math.round((e.clientY-d.offsetY-v.top+this.viewport.scrollTop)/this.zoom))};this.cleanupDrag();
+      if(inView&&candidate)this.transfer(d.source,candidate);else if(inView&&d.incompatibleReason)this.announce(d.incompatibleReason);else if(returning)this.transfer(d.source,{kind:'inventory'});else if(inView)this.transfer(d.source,{kind:'inventory'},position);else this.announce('移動をキャンセルしました。接続は変更していません。');
     }
-    freePosition() {
-      const x = Math.min(19000,Math.round(this.viewport.scrollLeft/this.zoom + 35));
-      let y = Math.round(this.viewport.scrollTop/this.zoom + 35);
-      const boxes = [...this.surface.querySelectorAll('.circuit-root')].map(el => ({x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight}));
-      for (let attempt=0; attempt<=boxes.length; attempt++) {
-        const hits = boxes.filter(box => x < box.x+box.width+24 && x+280+24 > box.x && y < box.y+box.height+24 && y+300+24 > box.y);
-        if (!hits.length) break;
-        y = Math.max(...hits.map(box => box.y+box.height+32));
-      }
-      return {x,y:Math.min(19000,y)};
-    }
-    add(type, position = this.freePosition(), attachment = null) {
-      const params = definitions[type].fields.skillId && this.skills.some(skill => skill.cost > 0) ? {skillId:this.skills.find(skill => skill.cost > 0).id} : {};
-      this.run(() => { this.selected = this.store.add(type,position,params,attachment); },'ブロックを追加しました。');
-      if (!attachment) this.surface.querySelector(`[data-id="${this.selected}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'});
-    }
-    renderInspector() {
-      this.inspector.replaceChildren(element('h4','','ブロックの設定'));
-      const node = this.store.document.nodes[this.selected];
-      if (!node) {
-        this.inspector.append(element('p','circuit-help','ブロックを選択すると、値の変更・接続・分離ができます。'),element('p','circuit-help','中間からドラッグすると、その下のブロックも一緒に移動します。'));
-        return;
-      }
-      const def = definitions[node.type]; this.inspector.append(element('p','circuit-selection',def.label));
-      const root = !parentOf(this.store.document,node.id);
-      if (root && def.kind !== 'event') this.inspector.append(element('p','circuit-warning','イベントにつながっていないため実行対象外です。'));
-      for (const [key,field] of Object.entries(def.fields)) {
-        const label = element('label','circuit-field'); label.append(element('span','',field.label));
-        let input;
-        if (field.values) {
-          input = element('select');
-          for (const value of field.values) {
-            const unavailable = key === 'skillId' && !this.skills.some(skill => skill.id === value);
-            const option = element('option','',this.labelValue(value) + (unavailable ? '（未所持）' : '')); option.value = value; input.append(option);
-          }
-        } else {
-          input = element('input'); input.type = 'number'; input.min = field.min; input.max = field.max; input.step = field.step;
-        }
-        input.value = node.params[key];
-        input.dataset.param = key;
-        input.addEventListener('change',() => {
-          if (!input.checkValidity()) { this.announce('入力範囲を確認してください。'); return; }
-          const value = field.values ? input.value : input.valueAsNumber;
-          this.run(() => this.store.setParams(node.id,{...node.params,[key]:value}),'設定を変更しました。');
-        });
-        label.append(input); this.inspector.append(label);
-      }
-      if (node.params.skillId && !this.skills.some(skill => skill.id === node.params.skillId)) this.inspector.append(element('p','circuit-warning','このスキルは現在未所持です。'));
-      const choices = element('select'); choices.setAttribute('aria-label','接続先');
-      const placeholder = element('option','','接続先を選択'); placeholder.value = ''; choices.append(placeholder);
-      const excluded = descendants(this.store.document,node.id);
-      for (const target of Object.values(this.store.document.nodes)) {
-        if (def.kind === 'event' || excluded.has(target.id)) continue;
-        for (const port of ports(target.type)) if (target.links[port] === null) {
-          const option = element('option','',`${definitions[target.type].label} (${this.summary(target) || kindNames[definitions[target.type].kind]}) → ${portNames[port]}`);
-          option.value = `${target.id}:${port}`; choices.append(option);
-        }
-      }
-      const connect = button('選んだ場所につなぐ',() => {
-        const [id,port] = choices.value.split(':'); if (!id) { this.announce('接続先を選択してください。'); return; }
-        this.run(() => this.store.connect(node.id,id,port),'ブロックを接続しました。');
-      });
-      choices.disabled = choices.options.length === 1; connect.disabled = choices.disabled;
-      this.inspector.append(choices,connect);
-      const detach = button('ここから下を分離',() => this.run(() => this.store.move(node.id,this.freePosition()),'子孫ごと分離しました。'));
-      detach.disabled = root;
-      const single = button('このブロックだけ取り外す',() => this.run(() => this.store.detachOnly(node.id,this.freePosition()),'後続を残して取り外しました。'));
-      single.disabled = def.kind === 'event' || (root && !node.links.next);
-      const count = descendants(this.store.document,node.id).size;
-      const remove = button(this.pendingDelete === node.id ? `${count}個を削除する` : 'スタックを削除…',() => {
-        if (this.pendingDelete !== node.id) { this.pendingDelete = node.id; this.renderInspector(); this.inspector.querySelector('.circuit-delete').focus(); this.announce(`このブロックを含む${count}個を削除します。もう一度押すと削除します。`); return; }
-        this.run(() => this.store.remove(node.id),'削除しました。元に戻す操作で復元できます。');
-      },'circuit-delete');
-      this.inspector.append(detach,single,remove);
-    }
-    setZoom(value) {
-      this.zoom = Math.max(.5,Math.min(2,Math.round(value*10)/10));
-      this.zoomLabel.textContent = `${Math.round(this.zoom*100)}%`; this.resizeSurface();
-      this.zoomOut.disabled = this.zoom === .5; this.zoomIn.disabled = this.zoom === 2;
-    }
-    pointerDown(event) {
-      if (event.button !== 0 || this.drag) return;
-      const source = event.target.closest('[data-add], [data-drag]');
-      if (!source) return;
-      const id = source.dataset.drag;
-      if (id) this.select(id);
-      const rect = (id ? this.surface.querySelector(`[data-id="${id}"]`) : source).getBoundingClientRect();
-      this.drag = {pointerId:event.pointerId, id, type:source.dataset.add, startX:event.clientX, startY:event.clientY, offsetX:event.clientX-rect.left, offsetY:event.clientY-rect.top, source, moved:false, candidate:null};
-      this.host.setPointerCapture(event.pointerId);
-    }
-    pointerMove(event) {
-      const drag = this.drag;
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      if (!drag.moved && Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY) < 6) return;
-      event.preventDefault();
-      if (!drag.moved) {
-        drag.moved = true;
-        const original = drag.id ? this.surface.querySelector(`[data-id="${drag.id}"]`) : null;
-        drag.ghost = original ? original.cloneNode(true) : element('div',`circuit-block kind-${definitions[drag.type].kind}`,definitions[drag.type].label);
-        drag.ghost.classList.add('circuit-drag-ghost'); drag.ghost.classList.remove('circuit-root');
-        drag.ghost.removeAttribute('data-id'); drag.ghost.style.width = `${original?.offsetWidth || 272}px`;
-        drag.ghost.style.transform = `scale(${drag.id ? this.zoom : 1})`;
-        drag.ghost.setAttribute('aria-hidden','true'); document.body.append(drag.ghost);
-        drag.ghost.inert = true;
-        original?.classList.add('is-dragging');
-      }
-      drag.ghost.style.left = `${event.clientX-drag.offsetX}px`; drag.ghost.style.top = `${event.clientY-drag.offsetY}px`;
-      this.updateCandidate(event.clientX-drag.offsetX,event.clientY-drag.offsetY);
-    }
-    updateCandidate(x,y) {
-      const drag = this.drag, doc = this.store.document;
-      const excluded = drag.id ? descendants(doc,drag.id) : new Set();
-      this.surface.querySelectorAll('.is-snap-target').forEach(el => el.classList.remove('is-snap-target'));
-      drag.candidate = null;
-      if (definitions[drag.type || doc.nodes[drag.id].type].kind === 'event') return;
-      const view = this.viewport.getBoundingClientRect();
-      const candidates = [];
-      this.surface.querySelectorAll('[data-target]').forEach(el => {
-        if (excluded.has(el.dataset.target)) return;
-        const rect = el.getBoundingClientRect();
-        if (rect.left < view.left || rect.top < view.top || rect.right > view.right || rect.bottom > view.bottom) return;
-        const distance = Math.hypot(rect.left-x,rect.top-y);
-        if (distance <= 24) candidates.push({id:el.dataset.target,port:el.dataset.port,distance,el});
-      });
-      candidates.sort((a,b) => a.distance-b.distance || `${a.id}:${a.port}`.localeCompare(`${b.id}:${b.port}`));
-      if (candidates.length) { drag.candidate = candidates[0]; drag.candidate.el.classList.add('is-snap-target'); }
-    }
-    pointerUp(event) {
-      const drag = this.drag;
-      if (!drag || drag.pointerId !== event.pointerId) return;
-      const view = this.viewport.getBoundingClientRect();
-      const inside = event.clientX >= view.left && event.clientX <= view.right && event.clientY >= view.top && event.clientY <= view.bottom;
-      if (!drag.moved) {
-        this.cleanupDrag(); if (drag.type) this.add(drag.type); return;
-      }
-      this.updateCandidate(event.clientX-drag.offsetX,event.clientY-drag.offsetY);
-      const candidate = drag.candidate;
-      const position = {x:Math.max(0,Math.min(20000,Math.round((event.clientX-drag.offsetX-view.left+this.viewport.scrollLeft)/this.zoom))),y:Math.max(0,Math.min(20000,Math.round((event.clientY-drag.offsetY-view.top+this.viewport.scrollTop)/this.zoom)))};
-      this.cleanupDrag();
-      if (!inside) { this.announce('配置をキャンセルしました。'); return; }
-      if (drag.type) this.add(drag.type,position,candidate);
-      else this.run(() => candidate ? this.store.connect(drag.id,candidate.id,candidate.port) : this.store.move(drag.id,position),candidate ? 'ブロックを接続しました。' : 'スタックを移動しました。');
-    }
-    cleanupDrag() {
-      const drag = this.drag; this.drag = null;
-      drag?.ghost?.remove();
-      this.surface.querySelectorAll('.is-dragging, .is-snap-target').forEach(el => el.classList.remove('is-dragging','is-snap-target'));
-      if (drag && this.host.hasPointerCapture(drag.pointerId)) this.host.releasePointerCapture(drag.pointerId);
-    }
-    cancelDrag() { if (this.drag) { this.cleanupDrag(); this.announce('配置をキャンセルしました。'); } }
-    keydown(event) {
-      if (event.key === 'Escape' && this.drag) { event.preventDefault(); event.stopPropagation(); this.cancelDrag(); return; }
-      if (event.target.matches('input, select, textarea')) { if (event.key !== 'Tab') event.stopPropagation(); return; }
-      if ((event.ctrlKey || event.metaKey) && ['z','y'].includes(event.key.toLowerCase())) {
-        event.preventDefault(); event.stopPropagation();
-        this.run(() => event.key.toLowerCase() === 'y' || event.shiftKey ? this.store.redo() : this.store.undo());
-      }
-    }
-    dispose() {
-      this.cancelDrag();
-      for (const [type,handler] of [['pointerdown',this.onDown],['pointermove',this.onMove],['pointerup',this.onUp],['pointercancel',this.onCancel],['lostpointercapture',this.onCancel],['keydown',this.onKey]]) this.host.removeEventListener(type,handler);
-      window.removeEventListener('blur',this.onCancel);
-      this.host.replaceChildren();
-    }
+    cleanupDrag(){const d=this.drag;this.drag=null;d?.ghost?.remove();this.host.querySelectorAll('.is-dragging,.is-snap-target,.is-incompatible').forEach(n=>n.classList.remove('is-dragging','is-snap-target','is-incompatible'));if(d&&this.host.hasPointerCapture(d.pointerId))this.host.releasePointerCapture(d.pointerId);}
+    cancelDrag(){if(this.drag){this.cleanupDrag();this.announce('移動をキャンセルしました。');}}
+    keydown(e){if(e.key==='Escape'&&this.drag){e.preventDefault();e.stopPropagation();this.cancelDrag();return;}if(e.target.matches('select,input,textarea')){if(e.key!=='Tab')e.stopPropagation();return;}if((e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();e.stopPropagation();if(e.key.toLowerCase()==='y'||e.shiftKey)this.redo();else this.undo();}}
+    dispose(){this.cancelDrag();Object.entries(this.handlers).forEach(([type,fn])=>this.host.removeEventListener(type,fn));window.removeEventListener('blur',this.onBlur);this.host.replaceChildren();}
   }
-  api.createEditor = (host,skills,catalog) => new CircuitEditor(host,skills,catalog);
+  api.createEditor=(host,options)=>new UpgradeEditor(host,options);
 })();
