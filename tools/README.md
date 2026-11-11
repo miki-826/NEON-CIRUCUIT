@@ -8,10 +8,11 @@
 
 ```bash
 node tools/check.mjs
+node tools/verify_circuit.cjs
 node tools/verify_combat.cjs
 ```
 
-前者はJavaScriptの構文、HTML/CSSのローカル参照、必須素材、LFS取得漏れを確認します。後者はブラウザを模した環境で、独立したスキル充填、スキル効果、敵の攻撃、固定シードでのラッシュ進行を確認します。描画と音声の再生は実際のブラウザでも確認してください。
+`check.mjs`はJavaScript構文、HTML/CSSのローカル参照、必須素材、LFS取得漏れを確認します。`verify_circuit.cjs`は回路の結合・分離、分岐保持、変更失敗時のロールバック、Undo/Redoと上限を検証します。`verify_combat.cjs`はブラウザを模した環境で、独立したスキル充填、スキル効果、敵の攻撃、固定シードでのラッシュ進行を確認します。描画と音声の再生は実際のブラウザでも確認してください。
 
 ## 武器音とボスBGM
 

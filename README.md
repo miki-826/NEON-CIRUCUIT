@@ -44,7 +44,7 @@ Escで一時停止し、スキル回路・設定・通信ログを開けます�
 
 ## 共同開発する
 
-スキル設定をScratch風のブロックUIへ移行する提案は、[スキル回路の全体アーキテクチャとデータ構造（ステップ1）](docs/VISUAL_SKILL_ARCHITECTURE.md)を参照してください。現在は設計レビュー段階で、実装は承認後に段階的に進めます。
+スキル設定のScratch風UIは、[全体設計](docs/VISUAL_SKILL_ARCHITECTURE.md)をもとに[ステップ2の編集UI](docs/VISUAL_SKILL_EDITOR.md)まで実装しています。出撃後、Esc → スキル回路で操作できます。ブロック回路は編集プレビューで、戦闘での実行と保存・読込は次の段階です。
 
 **mainへ直接pushせず、作業ブランチからPull Requestを作る運用にします。**
 

@@ -162,6 +162,7 @@
 
   // ---- Esc command menu ----------------------------------------------------
   const commandTabs = ['build','settings','log','quit'];
+  let circuitEditor = null;
   let commandTab = 'build', commandReturnFocus = null;
 
   function renderMissionLog(){
@@ -182,6 +183,10 @@
     if (tab === 'log') renderMissionLog();
     if (tab === 'settings') syncSettingsUI();
     if (tab === 'build') { lastBuild=''; renderBuild(); $('buildHint').textContent = inventory.length ? 'スキルを選んでから、保有ノードを押して接続します。' : 'ノードはレベルアップで手に入ります。'; }
+    if (tab === 'build' && window.NeonCircuit?.createEditor) {
+      if (!circuitEditor) circuitEditor = window.NeonCircuit.createEditor($('circuitEditor'), builds, [...masters, ...subs]);
+      else circuitEditor.setSkills(builds);
+    }
   }
 
   function openCommand(tab='build'){
@@ -199,6 +204,7 @@
 
   function closeCommand(){
     if (state!=='paused') return;
+    circuitEditor?.cancelDrag();
     $('command').hidden=true;
     $('app').inert=false;
     state=pausedFrom||'running';
@@ -208,6 +214,7 @@
   }
 
   function quitToTitle(){
+    circuitEditor?.cancelDrag();
     $('command').hidden=true;
     $('app').inert=false;
     resetPointer();
@@ -255,7 +262,7 @@
     // Keep keyboard focus inside the dialog.
     command.addEventListener('keydown', event => {
       if (event.key!=='Tab') return;
-      const focusable=[...command.querySelectorAll('button:not([disabled]), [tabindex="0"]')].filter(el=>el.tabIndex>=0 && el.offsetParent!==null);
+      const focusable=[...command.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex="0"]')].filter(el=>el.tabIndex>=0 && el.offsetParent!==null);
       if (!focusable.length) return;
       const first=focusable[0], last=focusable[focusable.length-1];
       if (event.shiftKey && document.activeElement===first) { event.preventDefault(); last.focus(); }
@@ -286,6 +293,7 @@
     addSkill(master);
     const starter = subs.find(s => s.id === starterSkills[selectedClass.id]);
     addSkill(starter);
+    circuitEditor?.reset(builds);
     selectedSkill=0; spawnClock=0; bossSpawned=false; nextRoundPending=false;
     state='running'; hide(); $('pauseBtn').disabled=false;
     $('combatStatus').textContent='自動発動 待機中';

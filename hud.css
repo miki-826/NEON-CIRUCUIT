@@ -454,7 +454,7 @@ body { font-family: var(--h-font-jp); }
   .hud-feed { bottom: calc(var(--h-gutter) + var(--h-safe-b) + 150px); font-size: 11px; }
   .touch-pad { bottom: calc(var(--h-gutter) + var(--h-safe-b) + 190px); }
   .command { padding: calc(12px + var(--h-safe-t)) 12px calc(12px + var(--h-safe-b)); place-items: stretch; }
-  .command-shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+  .command-shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: calc(100dvh - 24px - var(--h-safe-t) - var(--h-safe-b)); min-height: 0; }
   .command-nav { padding: 4px 0 10px; border-right: 0; border-bottom: 1px solid var(--h-line); }
   .command-title { font-size: 20px; }
   .command-run { margin: 2px 0 10px; font-size: 12px; }
