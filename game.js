@@ -93,16 +93,9 @@
   const reducedMotion = reducedMotionQuery;
   const skillSounds = {pulse:'pulse',volley:'volley',beam:'beam',blast:'burst',seeker:'seeker',arc:'arc',
     orbital:'orbital',slash:'slash',repair:'repair',shock:'arc',dash:'dash',frost:'frost',magnet:'magnet',aegis:'guard'};
-  const utilityRates = {repair:18,dash:23,frost:24,magnet:24,aegis:21};
   const play = (id, volume) => window.NeonAudio?.play(id, volume);
-  const nodes = [
-    {id:'multishot',name:'多重化',desc:'弾数 +2',cost:12},
-    {id:'discount',name:'省電力',desc:'消費 -5%',cost:0},
-    {id:'power',name:'増幅',desc:'威力 +25%',cost:10},
-    {id:'haste',name:'高速化',desc:'発動間隔 -15%',cost:8},
-    {id:'pierce',name:'貫通',desc:'弾が敵を1体貫く',cost:10},
-    {id:'leech',name:'吸収',desc:'命中時に少量回復',cost:13}
-  ];
+  const circuit = window.NeonCircuit;
+  const nodes = circuit.nodeDefinitions;
   const modeDefs = {demo:{label:'ラッシュ',rounds:[13,13,22]},hour:{label:'約1時間',rounds:[90,90,180]},spec:{label:'指定時間',rounds:[300,300,600]}};
   let selectedClass = classes[0], mode='demo', selectedSkill=0, choices=[], choiceType='', state='menu', pausedFrom='', last=0, clock=0, roundTime=0, wave=1, round=1, kills=0, level=1, xp=0, xpNeed=4, hp=100, maxHp=100, player={x:W/2,y:H/2,r:14}, enemies=[], bullets=[], effects=[], builds=[], inventory=[], keys=new Set(), pointer=null, spawnClock=0, lastUI=0, bossSpawned=false, nextRoundPending=false;
   let zones = [], hostileShots = [], spawned = 0, missionLog = [], transmissionUntil = 0;
@@ -162,6 +155,7 @@
 
   // ---- Esc command menu ----------------------------------------------------
   const commandTabs = ['build','settings','log','quit'];
+  let circuitEditor = null;
   let commandTab = 'build', commandReturnFocus = null;
 
   function renderMissionLog(){
@@ -181,7 +175,20 @@
     document.querySelectorAll('#command .command-page').forEach(page => { page.hidden = page.dataset.page !== tab; });
     if (tab === 'log') renderMissionLog();
     if (tab === 'settings') syncSettingsUI();
-    if (tab === 'build') { lastBuild=''; renderBuild(); $('buildHint').textContent = inventory.length ? 'スキルを選んでから、保有ノードを押して接続します。' : 'ノードはレベルアップで手に入ります。'; }
+    if (tab === 'build' && window.NeonCircuit?.createEditor) {
+      if (!circuitEditor) circuitEditor = circuit.createEditor($('circuitEditor'), {
+        getState: () => ({builds, inventory, context:upgradeContext(), getStats:skillStats}),
+        onChange: () => {
+          for (const skill of builds) {
+            const stats=skillStats(skill);
+            skill.charge=Math.min(skill.charge,stats.cost);
+            skill.cooldown=Math.min(skill.cooldown,stats.cooldown);
+          }
+          updateUI(); play('upgrade',.2);
+        }
+      });
+      else circuitEditor.refresh();
+    }
   }
 
   function openCommand(tab='build'){
@@ -199,6 +206,7 @@
 
   function closeCommand(){
     if (state!=='paused') return;
+    circuitEditor?.cancelDrag();
     $('command').hidden=true;
     $('app').inert=false;
     state=pausedFrom||'running';
@@ -208,6 +216,7 @@
   }
 
   function quitToTitle(){
+    circuitEditor?.cancelDrag();
     $('command').hidden=true;
     $('app').inert=false;
     resetPointer();
@@ -255,7 +264,7 @@
     // Keep keyboard focus inside the dialog.
     command.addEventListener('keydown', event => {
       if (event.key!=='Tab') return;
-      const focusable=[...command.querySelectorAll('button:not([disabled]), [tabindex="0"]')].filter(el=>el.tabIndex>=0 && el.offsetParent!==null);
+      const focusable=[...command.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex="0"]')].filter(el=>el.tabIndex>=0 && el.offsetParent!==null);
       if (!focusable.length) return;
       const first=focusable[0], last=focusable[focusable.length-1];
       if (event.shiftKey && document.activeElement===first) { event.preventDefault(); last.focus(); }
@@ -270,7 +279,7 @@
     const art = isNode ? '' : `<img class="choice-art" src="${artPath('skills',option.id)}" alt="">`;
     let detail = option.cost ? `COST ${option.cost}` : '常時発動';
     if (option.id === 'shock') detail='周期発動';
-    if (isNode) detail=option.cost ? `追加コスト +${option.cost}` : '消費コスト -5%';
+    if (isNode) detail='強化ノード · 追加コストなし';
     if (option.choiceKind === 'rank') detail='威力アップ';
     return `<button class="choice" data-choice="${index}">${art}<span class="choice-kicker">${kicker}</span><strong>${option.name}</strong><p>${option.desc}</p><span class="choice-bottom">${detail}</span></button>`;
   }
@@ -286,6 +295,8 @@
     addSkill(master);
     const starter = subs.find(s => s.id === starterSkills[selectedClass.id]);
     addSkill(starter);
+    for (const id of ['power','power','haste','velocity','multishot','area','pierce','homing','explosion','split','amplifyPrevious','amplifyFollowing']) inventory.push(circuit.createNode(id));
+    circuitEditor?.reset();
     selectedSkill=0; spawnClock=0; bossSpawned=false; nextRoundPending=false;
     state='running'; hide(); $('pauseBtn').disabled=false;
     $('combatStatus').textContent='自動発動 待機中';
@@ -294,9 +305,31 @@
     deploySquad();
     updateUI();
   }
-  function costOf(s){let c=s.cost+s.nodes.reduce((v,n)=>v+n.cost,0);for(const n of s.nodes)if(n.id==='discount')c*=.95;return Math.max(1,Math.round(c))}
-  function nodeCount(s,id){return s.nodes.filter(n=>n.id===id).length}
-  function multiplier(s){return 1+nodeCount(s,'power')*.25+(s.rank-1)*.18}
+  const compiledSkills = new WeakMap();
+  let hasteSignature='', hastePower=0;
+  function upgradeContext(){
+    const haste = builds.find(skill => skill.id === 'haste');
+    const key=haste ? `${haste.rank}|${haste.nodes.map(n=>n.uid+':'+n.id).join(',')}` : '';
+    if (key!==hasteSignature) {
+      hasteSignature=key;
+      hastePower=haste ? circuit.compileSkill(haste,{attack:selectedClass.atk,level,chargeBoost:1}).utilityPower : 0;
+    }
+    return {attack:selectedClass.atk,level,chargeBoost:1 + .25*hastePower,maxHp,baseMoveSpeed:selectedClass.speed};
+  }
+  function movementSpeed(){
+    const haste=builds.find(skill=>skill.id==='haste');
+    return selectedClass.speed*(1+(haste ? .18*skillStats(haste).utilityPower : 0));
+  }
+  function skillStats(skill){
+    const context = upgradeContext();
+    const key = `${skill.rank}|${context.attack}|${context.level}|${context.chargeBoost}|${skill.nodes.map(n=>`${n.uid || ''}:${n.id}`).join(',')}`;
+    const cached = compiledSkills.get(skill);
+    if (cached?.key === key) return cached.stats;
+    const stats = circuit.compileSkill(skill,context);
+    compiledSkills.set(skill,{key,stats});
+    return stats;
+  }
+  function costOf(s){return skillStats(s).cost}
   function addSkill(skill){
     const existing = builds.findIndex(s => s.id === skill.id);
     if (existing >= 0) {
@@ -311,7 +344,7 @@
   }
   function levelUp(){play('upgrade',.5);emit({type:'levelup'});level++;xp-=xpNeed;xpNeed=Math.round(4+level*4+level*level*.52);hp=Math.min(maxHp,hp+Math.round(maxHp*.18));const pool=[...pick(subs.filter(s=>!builds.some(b=>b.id===s.id)),2).map(o=>({...o,choiceKind:'skill'})),...pick(nodes,2).map(o=>({...o,choiceKind:'node'}))];if(builds.length>0){let upgrade=builds[Math.floor(rand(0,builds.length))];pool.push({...upgrade,choiceKind:'rank',name:'強化：'+upgrade.name,desc:'既存スキルのランクを上げて威力を強化。'})}let required=[pool.find(o=>o.choiceKind==='skill'),pool.find(o=>o.choiceKind==='node')].filter(Boolean);choices=[...required,...pick(pool.filter(o=>!required.includes(o)),3-required.length)];if(choices.length<3)choices.push(...pick(nodes,3-choices.length).map(o=>({...o,choiceKind:'node'})));choiceType='level';showChoices('レベルアップ','回路を1つ拡張してください。スキル、ノード、既存スキル強化が出現します。');state='choice';updateUI()}
   function showChoices(title,desc){show(`<div class="overlay-content"><span class="small-label">${choiceType==='boss'?'BOSS CACHE':'LEVEL '+level}</span><h3 class="overlay-title">${title}</h3><p class="overlay-desc">${desc}</p><div class="choice-grid">${choices.map((o,i)=>card(o,i,o.choiceKind==='node'?'NODE':o.choiceKind==='rank'?'UPGRADE':o.kind==='main'?'MASTER':'SUB SKILL')).join('')}</div></div>`);document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>selectChoice(choices[+b.dataset.choice]))}
-  function selectChoice(o){if(o.choiceKind==='node'){inventory.push({...o});log(`ノード「${o.name}」を入手。スキル回路で接続できます`)}else if(o.choiceKind==='rank'){let s=builds.find(b=>b.id===o.id)||builds[selectedSkill];s.rank++;log(`「${s.name}」をランク${s.rank}に強化`)}else{const added=addSkill(o);log(added?`スキル「${o.name}」を回路に追加`:`「${o.name}」をランク${builds[selectedSkill].rank}に強化`)}hide();state='running';updateUI();if(choiceType==='boss'&&nextRoundPending)advanceRound()}
+  function selectChoice(o){if(o.choiceKind==='node'){inventory.push(circuit.createNode(o.id));log(`ノード「${o.name}」を入手。スキル回路で接続できます`)}else if(o.choiceKind==='rank'){let s=builds.find(b=>b.id===o.id)||builds[selectedSkill];s.rank++;log(`「${s.name}」をランク${s.rank}に強化`)}else{const added=addSkill(o);log(added?`スキル「${o.name}」を回路に追加`:`「${o.name}」をランク${builds[selectedSkill].rank}に強化`)}hide();state='running';updateUI();if(choiceType==='boss'&&nextRoundPending)advanceRound()}
   function bossReward(){choiceType='boss';choices=pick([...masters,...subs].filter(s=>!builds.some(b=>b.id===s.id)),3).map(o=>({...o,choiceKind:'skill'}));if(choices.length<3)choices.push(...pick(subs,3-choices.length).map(o=>({...o,choiceKind:'skill'})));state='choice';showChoices(`${bossName()}の報酬`,'ボスからマスター／サブスキルを1つ獲得。既に持っているスキルはランクが上がります。')}
   function advanceRound(){
     nextRoundPending=false;
@@ -361,33 +394,33 @@
   }
 
   function damageFor(skill){
-    return skill.damage * selectedClass.atk * Math.pow(1.18,level-1) * multiplier(skill);
+    return skillStats(skill).damage;
   }
 
   function shoot(skill){
-    const multi = nodeCount(skill,'multishot');
-    const range = {blast:155+multi*22,slash:114+multi*14,arc:315,orbital:510}[skill.id] ?? Infinity;
+    const stats = skillStats(skill);
+    const range = stats.range;
     const target = nearest(range);
     if (!target) return false;
     const angle = Math.atan2(target.y-player.y,target.x-player.x);
-    const damage = damageFor(skill);
+    const damage = stats.damage;
     player.angle=angle+Math.PI/2;
     player.recoilAngle=angle;
     player.recoilUntil=clock+.16;
 
     if (skill.id==='orbital') {
-      zones.push({x:target.x,y:target.y,r:81+multi*14,t:.55,duration:.55,color:'#ffd081',skill,damage});
+      zones.push({x:target.x,y:target.y,r:stats.radius,t:.55,duration:.55,color:'#ffd081',skill,stats,damage});
       return true;
     }
     if (skill.id==='arc') {
       const chained = new Set();
       let origin = player, next = target;
-      for (let index=0; next && index<3+multi*2; index++) {
+      for (let index=0; next && index<3+stats.bonusProjectiles; index++) {
         effect('arc',origin.x,origin.y,'#87f9ff',.27,{x2:next.x,y2:next.y});
-        hurtEnemy(next,damage*Math.pow(.84,index),skill);
+        hurtEnemy(next,damage*Math.pow(.84,index),skill,stats);
         chained.add(next);
         origin=next;
-        next=nearestTo(origin,148+nodeCount(skill,'pierce')*26,chained);
+        next=nearestTo(origin,stats.radius,chained);
       }
       return true;
     }
@@ -398,33 +431,34 @@
         const distance=Math.hypot(dx,dy);
         if (distance > range) continue;
         if (isSlash && dx*Math.cos(angle)+dy*Math.sin(angle) < distance*.5) continue;
-        hurtEnemy(enemy,isSlash?damage:damage*(1-distance/300),skill);
+        hurtEnemy(enemy,isSlash?damage:damage*Math.max(.35,1-distance/(range*2)),skill,stats);
       }
       effect(isSlash?'slash':'impact',player.x,player.y,'#ba87ff',.31,{r:range,angle});
       return true;
     }
     if (skill.id==='beam') {
-      const width=17+multi*8;
+      const width=stats.radius;
       for (const enemy of enemies) {
         const dx=enemy.x-player.x, dy=enemy.y-player.y;
         const along=dx*Math.cos(angle)+dy*Math.sin(angle);
         const across=Math.abs(-dx*Math.sin(angle)+dy*Math.cos(angle));
-        if (along>0 && along<760 && across<width+enemy.r) hurtEnemy(enemy,damage,skill);
+        if (along>0 && along<range && across<width+enemy.r) hurtEnemy(enemy,damage,skill,stats);
       }
-      effect('trail',player.x,player.y,'#79f0ff',.24,{x2:player.x+Math.cos(angle)*760,y2:player.y+Math.sin(angle)*760});
+      effect('trail',player.x,player.y,'#79f0ff',.24,{x2:player.x+Math.cos(angle)*range,y2:player.y+Math.sin(angle)*range});
       return true;
     }
 
-    const count=(skill.id==='volley'?3:1)+multi*2;
+    if (bullets.length >= 512) return false;
+    const count=Math.min(stats.projectileCount,512-bullets.length);
     const spread=skill.id==='volley'?.19:.12;
-    const homing=skill.id==='seeker';
-    const speed=homing?400:560;
+    const homing=stats.homing;
+    const speed=stats.projectileSpeed;
     const muzzleX=player.x+Math.cos(angle)*17, muzzleY=player.y+Math.sin(angle)*17;
     effect('sparks',muzzleX,muzzleY,colorOf(skill),.15,{r:19,count:5,angle});
     for (let index=0; index<count; index++) {
       const heading=angle+(index-(count-1)/2)*spread;
       bullets.push({x:muzzleX,y:muzzleY,vx:Math.cos(heading)*speed,vy:Math.sin(heading)*speed,
-        r:homing?7:5,damage,life:1.5,pierce:1+nodeCount(skill,'pierce'),source:skill,
+        r:stats.projectileRadius,damage,life:1.5*stats.areaMultiplier,pierce:stats.pierce,source:skill,stats,speed,generation:0,
         color:colorOf(skill),homing,hits:new Set()});
     }
     return true;
@@ -442,7 +476,7 @@
     return target;
   }
 
-  function hurtEnemy(enemy,damage,skill){
+  function hurtEnemy(enemy,damage,skill,stats = skill ? skillStats(skill) : null){
     if (enemy.hp<=0) return;
     enemy.hp-=damage;
     if (!enemy.hit) {
@@ -451,7 +485,7 @@
     }
     enemy.hit=.12;
     effect('text',enemy.x+rand(-8,8),enemy.y-12,'#e7f9ff',.43,{text:Math.round(damage)});
-    if (skill && nodeCount(skill,'leech')) hp=Math.min(maxHp,hp+nodeCount(skill,'leech')*.55);
+    if (stats?.leech) hp=Math.min(maxHp,hp+stats.leech);
     if (enemy.hp>0) return;
     kills++;
     xp+=enemy.boss?16+wave*2:enemy.elite?4:1;
@@ -465,47 +499,48 @@
   }
 
   function useSub(skill){
+    const stats=skillStats(skill);
     if (skill.id==='repair') {
       if (hp>maxHp*.9) return false;
-      hp=Math.min(maxHp,hp+maxHp*(.18+(skill.rank-1)*.04)*(1+nodeCount(skill,'power')*.25));
+      hp=Math.min(maxHp,hp+maxHp*(.18+(skill.rank-1)*.04)*stats.utilityPower);
       effect('ring',player.x,player.y,'#76e9ba',.45,{r:68});
       return true;
     }
     if (skill.id==='dash') {
-      const close=nearest(95);
+      const close=nearest(stats.range);
       if (!close) return false;
       const angle=Math.atan2(player.y-close.y,player.x-close.x);
       const {x,y}=player;
-      player.x=clamp(x+Math.cos(angle)*130,25,W-25);
-      player.y=clamp(y+Math.sin(angle)*130,25,H-25);
-      player.inv=.55;
+      player.x=clamp(x+Math.cos(angle)*130*stats.utilityPower,25,W-25);
+      player.y=clamp(y+Math.sin(angle)*130*stats.utilityPower,25,H-25);
+      player.inv=Math.min(3,.55*stats.utilityPower);
       effect('trail',x,y,'#aa82ff',.32,{x2:player.x,y2:player.y});
       return true;
     }
     if (skill.id==='aegis') {
-      if (!nearest(130) || player.guardUntil>clock) return false;
-      player.guardUntil=clock+2+(skill.rank-1)*.15;
+      if (!nearest(stats.range) || player.guardUntil>clock) return false;
+      player.guardUntil=clock+(2+(skill.rank-1)*.15)*stats.utilityPower;
       effect('ring',player.x,player.y,'#74ffd3',.4,{r:54});
       return true;
     }
 
     if (skill.id!=='frost' && skill.id!=='magnet') return false;
     const frost=skill.id==='frost';
-    const radius=(frost?170:190)+nodeCount(skill,'multishot')*18;
-    const center=frost?player:nearest(385);
+    const radius=stats.radius;
+    const center=frost?player:nearest(stats.range);
     if (!center || (frost && !nearest(radius))) return false;
     const {x,y}=center;
-    const damage=damageFor(skill);
+    const damage=stats.damage;
     for (const enemy of enemies) {
       const dx=x-enemy.x, dy=y-enemy.y;
       if (enemy.hp<=0 || Math.hypot(dx,dy)>radius) continue;
-      if (frost) enemy.slowUntil=clock+1.6+(skill.rank-1)*.12;
+      if (frost) enemy.slowUntil=clock+(1.6+(skill.rank-1)*.12)*stats.utilityPower;
       else if (!enemy.boss) {
         effect('trail',enemy.x,enemy.y,'#ff83b0',.24,{x2:x,y2:y});
-        enemy.x+=dx*.43;
-        enemy.y+=dy*.43;
+        enemy.x+=dx*Math.min(.9,.43*stats.utilityPower);
+        enemy.y+=dy*Math.min(.9,.43*stats.utilityPower);
       }
-      hurtEnemy(enemy,damage,skill);
+      hurtEnemy(enemy,damage,skill,stats);
     }
     effect('impact',x,y,frost?'#86cfff':'#ff83b0',.44,{r:radius});
     return true;
@@ -513,7 +548,8 @@
 
   function hurtPlayer(damage){
     if (player.inv>0) return;
-    const barrier = builds.some(skill=>skill.id==='barrier') ? .73 : 1;
+    const barrierSkill=builds.find(skill=>skill.id==='barrier');
+    const barrier=barrierSkill ? Math.max(.1,1-.27*skillStats(barrierSkill).utilityPower) : 1;
     const guard = player.guardUntil>clock ? .35 : 1;
     hp=Math.max(0,hp-damage*barrier*guard/selectedClass.def);
     player.inv=.55;
@@ -541,7 +577,7 @@
         }
       } else {
         for (const enemy of enemies) {
-          if (Math.hypot(enemy.x-zone.x,enemy.y-zone.y)<zone.r+enemy.r) hurtEnemy(enemy,zone.damage,zone.skill);
+          if (Math.hypot(enemy.x-zone.x,enemy.y-zone.y)<zone.r+enemy.r) hurtEnemy(enemy,zone.damage,zone.skill,zone.stats);
         }
       }
     }
@@ -601,15 +637,63 @@
     hostileShots=hostileShots.filter(s=>s.life>0 && s.x>-15 && s.x<W+15 && s.y>-15 && s.y<H+15);
   }
   function chargeRate(skill){
-    const base = utilityRates[skill.id] ?? 68;
-    const boost = builds.some(s => s.id === 'haste') ? 1.25 : 1;
-    // Defensive skills retain a recovery window even with a mature build.
-    const growth=skill.kind==='main'?4:skill.damage?2:1;
-    return (base + (level - 1) * growth) * boost / intervalFactor(skill);
+    return skillStats(skill).chargeRate;
   }
 
-  function intervalFactor(skill){
-    return 1 - nodeCount(skill,'haste') * .15;
+  function updateBullets(dt){
+    const pending=[];
+    for (const bullet of bullets) {
+      if (bullet.life<=0) continue;
+      const target=bullet.homing ? nearestTo(bullet,Infinity) : null;
+      const speed=bullet.speed || Math.hypot(bullet.vx,bullet.vy);
+      if (target) {
+        const angle=Math.atan2(target.y-bullet.y,target.x-bullet.x);
+        const turn=Math.min(1,dt*5);
+        bullet.vx+=(Math.cos(angle)*speed-bullet.vx)*turn;
+        bullet.vy+=(Math.sin(angle)*speed-bullet.vy)*turn;
+        const length=Math.hypot(bullet.vx,bullet.vy) || 1;
+        bullet.vx=bullet.vx/length*speed; bullet.vy=bullet.vy/length*speed;
+      }
+      const oldX=bullet.x,oldY=bullet.y;
+      bullet.x+=bullet.vx*dt; bullet.y+=bullet.vy*dt; bullet.life-=dt;
+      const dx=bullet.x-oldX,dy=bullet.y-oldY,lengthSquared=dx*dx+dy*dy;
+      // Swept collision keeps high-speed projectiles from passing through enemies.
+      const hits=[];
+      for (const enemy of enemies) {
+        if (enemy.hp<=0 || bullet.hits.has(enemy)) continue;
+        const along=lengthSquared ? clamp(((enemy.x-oldX)*dx+(enemy.y-oldY)*dy)/lengthSquared,0,1) : 0;
+        if (Math.hypot(enemy.x-oldX-dx*along,enemy.y-oldY-dy*along)<enemy.r+bullet.r) hits.push({enemy,along});
+      }
+      hits.sort((a,b)=>a.along-b.along);
+      for (const {enemy} of hits) {
+        if (enemy.hp<=0) continue;
+        hurtEnemy(enemy,bullet.damage,bullet.source,bullet.stats);
+        bullet.hits.add(enemy);
+        const stats=bullet.stats;
+        if (stats && !bullet.secondaryTriggered && !bullet.generation) {
+          bullet.secondaryTriggered=true;
+          if (stats.explosionRadius>0) {
+            effect('impact',enemy.x,enemy.y,'#ffad64',.35,{r:stats.explosionRadius});
+            play('burst',.18);
+            for (const nearby of enemies) if (nearby!==enemy && nearby.hp>0 && Math.hypot(nearby.x-enemy.x,nearby.y-enemy.y)<=stats.explosionRadius+nearby.r) {
+              hurtEnemy(nearby,bullet.damage*stats.explosionDamage,bullet.source,stats);
+            }
+          }
+          if (stats.splitCount>0) {
+            const angle=Math.atan2(bullet.vy,bullet.vx);
+            const count=Math.min(stats.splitCount,512-bullets.length-pending.length);
+            for (let index=0; index<count; index++) {
+              const heading=angle+(index-(count-1)/2)*.42;
+              pending.push({...bullet,x:enemy.x,y:enemy.y,vx:Math.cos(heading)*speed,vy:Math.sin(heading)*speed,
+                damage:bullet.damage*.55,life:1.1,pierce:1,generation:1,secondaryTriggered:true,hits:new Set([enemy])});
+            }
+          }
+        }
+        if (--bullet.pierce<=0) { bullet.life=0; break; }
+      }
+    }
+    bullets=bullets.filter(b=>b.life>0&&b.x>-30&&b.x<W+30&&b.y>-30&&b.y<H+30);
+    bullets.push(...pending.slice(0,512-bullets.length));
   }
 
   function activateSkills(dt){
@@ -632,19 +716,19 @@
       skill.cooldown = Math.max(0, skill.cooldown - dt);
       if (skill.cooldown > 0) continue;
       const orbit = skill.id === 'orbit';
-      const radius = (orbit ? 78 : 145) + nodeCount(skill,'multishot') * 18;
-      const damage = (orbit ? 5 + skill.rank * 2 : 14 + skill.rank * 4)
-        * selectedClass.atk * Math.pow(1.18,level-1) * multiplier(skill);
+      const stats = skillStats(skill);
+      const radius = stats.radius;
+      const damage = stats.damage;
       for (const enemy of enemies) {
         if (Math.hypot(enemy.x-player.x,enemy.y-player.y) < radius + (orbit ? enemy.r : 0)) {
-          hurtEnemy(enemy,damage,skill);
+          hurtEnemy(enemy,damage,skill,stats);
         }
       }
       if (!orbit) {
         effect('impact',player.x,player.y,'#aa82ff',.32,{r:radius});
         if (nearest(radius)) play('arc',.22);
       }
-      skill.cooldown = (orbit ? .22 : 2.8) * intervalFactor(skill);
+      skill.cooldown = stats.cooldown;
     }
   }
   function update(dt){
@@ -660,7 +744,7 @@
     const dx=Number(right)-Number(left)+(pointer?.dx??0);
     const dy=Number(down)-Number(up)+(pointer?.dy??0);
     const length=Math.hypot(dx,dy)||1;
-    const speed=selectedClass.speed*(builds.some(s=>s.id==='haste')?1.18:1);
+    const speed=movementSpeed();
     const previousX=player.x, previousY=player.y;
     player.x=clamp(player.x+dx/length*speed*dt,18,W-18);
     player.y=clamp(player.y+dy/length*speed*dt,18,H-18);
@@ -691,25 +775,7 @@
     }
     updateHostileShots(dt);
     if (state==='ended') return;
-    for (const bullet of bullets) {
-      const target = bullet.homing ? nearestTo(bullet,Infinity) : null;
-      if (target) {
-        const angle=Math.atan2(target.y-bullet.y,target.x-bullet.x);
-        bullet.vx+=(Math.cos(angle)*420-bullet.vx)*dt*2;
-        bullet.vy+=(Math.sin(angle)*420-bullet.vy)*dt*2;
-      }
-      bullet.x+=bullet.vx*dt;
-      bullet.y+=bullet.vy*dt;
-      bullet.life-=dt;
-      for (const enemy of enemies) {
-        if (enemy.hp<=0 || bullet.hits.has(enemy)) continue;
-        if (Math.hypot(enemy.x-bullet.x,enemy.y-bullet.y)>=enemy.r+bullet.r) continue;
-        hurtEnemy(enemy,bullet.damage,bullet.source);
-        bullet.hits.add(enemy);
-        if (--bullet.pierce<=0) { bullet.life=0; break; }
-      }
-    }
-    bullets=bullets.filter(b=>b.life>0&&b.x>-30&&b.x<W+30&&b.y>-30&&b.y<H+30);
+    updateBullets(dt);
     effects.forEach(effect=>effect.t-=dt);
     effects=effects.filter(effect=>effect.t>0);
     updateZones(dt);
@@ -766,7 +832,7 @@
       classId: selectedClass.id, classColor: selectedClass.color,
       hp, maxHp, wave, round,
       player, enemies, bullets, hostileShots, zones, effects,
-      orbit: orbit ? {count:2+orbit.rank+2*nodeCount(orbit,'multishot'), radius:62+18*nodeCount(orbit,'multishot')} : null,
+      orbit: orbit ? {count:Math.min(32,2+orbit.rank+skillStats(orbit).bonusProjectiles), radius:skillStats(orbit).radius} : null,
       bossActive: enemies.some(enemy=>enemy.boss && enemy.hp>0),
       events
     }); } catch (error) { fallBackTo2d(error); }
@@ -842,8 +908,8 @@
     }
     const orbit=builds.find(s=>s.id==='orbit');
     if (orbit) {
-      const count=2+orbit.rank+2*nodeCount(orbit,'multishot');
-      const radius=62+18*nodeCount(orbit,'multishot');
+      const count=Math.min(32,2+orbit.rank+skillStats(orbit).bonusProjectiles);
+      const radius=skillStats(orbit).radius;
       for (let index=0;index<count;index++) {
         const angle=clock*2.8+index*TAU/count;
         const x=player.x+Math.cos(angle)*radius,y=player.y+Math.sin(angle)*radius;
@@ -896,8 +962,8 @@
     $('bossName').textContent=bossName();
     $('bossFill').style.transform=`scaleX(${clamp(boss.hp/boss.max,0,1)})`;
   }
-  function updateUI(){updateBossBar();let remain=Math.max(0,modeDefs[mode].rounds[round-1]-roundTime);$('timerLabel').textContent=`${String(Math.floor(Math.ceil(remain)/60)).padStart(2,'0')}:${String((Math.ceil(remain)%60)).padStart(2,'0')}`;$('waveLabel').textContent=`WAVE ${String(wave).padStart(2,'0')}`;$('roundLabel').textContent=`ROUND ${round} / 3`;$('enemyCount').textContent=enemies.length;$('killCount').textContent=kills;$('hpText').textContent=`${Math.ceil(hp)} / ${maxHp}`;$('hpFill').style.width=`${hp/maxHp*100}%`;$('xpText').textContent=`${xp} / ${xpNeed}`;$('xpFill').style.width=`${xp/xpNeed*100}%`;$('levelText').textContent=`LV ${level}`;$('classTag').textContent=selectedClass.name;$('attackStat').textContent=selectedClass.atk.toFixed(2);$('defenseStat').textContent=selectedClass.def.toFixed(2);$('speedStat').textContent=Math.round(selectedClass.speed*(builds.some(s=>s.id==='haste')?1.18:1));$('slotCount').textContent=`${builds.length} / ${skillTotal}`;renderBuild();updateSkillHud()}
-  let lastBuild='';function renderBuild(){let html=builds.length?builds.map((s,i)=>`<div class="skill-card ${i===selectedSkill?'selected':''}" data-skill="${i}" role="button" tabindex="0" aria-pressed="${i===selectedSkill}"><div class="skill-top"><span class="skill-card-thumb"><img class="skill-card-art" src="${artPath('skills',s.id)}" alt=""><span class="skill-time" aria-hidden="true"></span></span><span><span class="skill-name">${s.name} <small>Lv.${s.rank}</small></span><span class="skill-type">${s.kind==='main'?'マスター':s.kind==='passive'?'パッシブ':s.kind==='move'?'移動':'アクティブ'}</span></span><span class="skill-cost">${s.cost?`COST ${costOf(s)}`:'常時'}</span></div><p class="skill-desc">${s.desc}</p><div class="attached">${s.nodes.map((n,j)=>`<span>${n.name} <button type="button" class="remove-node" data-remove="${i}:${j}" aria-label="${n.name}を外す">×</button></span>`).join('')}${s.nodes.length<2?'<span class="empty">＋ ノード接続</span>':''}</div></div>`).join(''):'<div class="empty-build">出撃後にスキルが表示されます。</div>';let nhtml=inventory.length?inventory.map((n,i)=>`<button class="node" data-node="${i}" title="${n.desc}">${n.name}<small>${n.desc}</small></button>`).join(''):'<div class="empty-node">レベルアップで獲得できます。</div>';let key=html+'|'+nhtml;if(key===lastBuild)return;lastBuild=key;const focusKey=(el=>el&&(el.dataset.remove!==undefined?`[data-remove="${el.dataset.remove}"]`:el.dataset.node!==undefined?'[data-node]':el.dataset.skill!==undefined?`[data-skill="${el.dataset.skill}"]`:null))(document.activeElement?.closest?.('#command [data-remove], #command [data-node], #command [data-skill]'));$('skillList').innerHTML=html;$('nodeList').innerHTML=nhtml;if(focusKey){const again=$('command').querySelector(focusKey)||$('skillList').querySelector('[data-skill]');again?.focus({preventScroll:true})}document.querySelectorAll('[data-skill]').forEach(el=>{el.onkeydown=e=>{if(e.target===el&&(e.key==='Enter'||e.key===' ')){e.preventDefault();el.click()}};el.onclick=e=>{let rem=e.target.closest('[data-remove]');if(rem){let [si,ni]=rem.dataset.remove.split(':').map(Number);inventory.push(builds[si].nodes.splice(ni,1)[0]);log('ノードを取り外しました')}else selectedSkill=+el.dataset.skill;lastBuild='';renderBuild()}});document.querySelectorAll('[data-node]').forEach(el=>el.onclick=()=>{let s=builds[selectedSkill];if(!s){log('先にスキルを選択してください');return}if(s.nodes.length>=2){log('このスキルのノード枠は満杯です');return}let candidate=inventory[+el.dataset.node];if(s.kind==='passive'&&['discount','pierce'].includes(candidate.id)){log('このノードはパッシブスキルに接続できません');return}let n=inventory.splice(+el.dataset.node,1)[0];s.nodes.push(n);log(`「${s.name}」に「${n.name}」を接続`);lastBuild='';renderBuild()})}
+  function updateUI(){updateBossBar();let remain=Math.max(0,modeDefs[mode].rounds[round-1]-roundTime);$('timerLabel').textContent=`${String(Math.floor(Math.ceil(remain)/60)).padStart(2,'0')}:${String((Math.ceil(remain)%60)).padStart(2,'0')}`;$('waveLabel').textContent=`WAVE ${String(wave).padStart(2,'0')}`;$('roundLabel').textContent=`ROUND ${round} / 3`;$('enemyCount').textContent=enemies.length;$('killCount').textContent=kills;$('hpText').textContent=`${Math.ceil(hp)} / ${maxHp}`;$('hpFill').style.width=`${hp/maxHp*100}%`;$('xpText').textContent=`${xp} / ${xpNeed}`;$('xpFill').style.width=`${xp/xpNeed*100}%`;$('levelText').textContent=`LV ${level}`;$('classTag').textContent=selectedClass.name;$('attackStat').textContent=selectedClass.atk.toFixed(2);$('defenseStat').textContent=selectedClass.def.toFixed(2);$('speedStat').textContent=Math.round(movementSpeed());$('slotCount').textContent=`${builds.length} / ${skillTotal}`;renderBuild();updateSkillHud()}
+  function renderBuild(){ if (state === 'paused') circuitEditor?.refresh(); }
   let hudTiles = [];
   function updateMusic(){
     if (state!=='running') { window.NeonMusic.setScene(null); return; }
@@ -934,7 +1000,7 @@
         if (skill.flashUntil > clock) { label='発動'; phase='fired'; }
       } else if (skill.id === 'shock') {
         remaining = skill.cooldown;
-        progress = 1 - remaining / (2.8 * intervalFactor(skill));
+        progress = clamp(1 - remaining / skillStats(skill).cooldown,0,1);
         label = `${(Math.ceil(remaining*10)/10).toFixed(1)}秒`;
         detail = 'コストなし・周期発動';
       } else {

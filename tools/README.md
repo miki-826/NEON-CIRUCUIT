@@ -8,10 +8,12 @@
 
 ```bash
 node tools/check.mjs
+node tools/verify_circuit.cjs
 node tools/verify_combat.cjs
+node tools/verify_upgrade_combat.cjs
 ```
 
-前者はJavaScriptの構文、HTML/CSSのローカル参照、必須素材、LFS取得漏れを確認します。後者はブラウザを模した環境で、独立したスキル充填、スキル効果、敵の攻撃、固定シードでのラッシュ進行を確認します。描画と音声の再生は実際のブラウザでも確認してください。
+`check.mjs`はJavaScript構文、HTML/CSSの参照、必須素材、LFS取得漏れを確認します。`verify_circuit.cjs`はチェイン倍率、順序増幅、所持ノードの移動と数の保存を検証します。`verify_combat.cjs`は既存スキル、敵の攻撃、固定シードの10ウェーブ戦闘を検証します。`verify_upgrade_combat.cjs`はゲーム本体の関数を実行し、強化プレビューと弾の威力・数・速度・追尾・貫通・爆発・分裂・充填・補助効果の一致を検証します。描画と音声は実際のブラウザでも確認してください。
 
 ## 武器音とボスBGM
 

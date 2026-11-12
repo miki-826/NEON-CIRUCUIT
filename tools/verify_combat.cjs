@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const {randomUUID} = require('node:crypto');
 const project = path.resolve(__dirname, '..');
 
 const element = {getContext: () => ({}), addEventListener() {}, setAttribute() {}, focus() {}, style:{}, dataset:{},
@@ -10,11 +11,13 @@ element.firstElementChild=element;
 const soundEvents=[];
 const musicEvents=[];
 const globals = {
+  crypto:{randomUUID}, structuredClone,
   Image: class {}, matchMedia: () => ({matches: false}),
   document: {body:element, getElementById: () => element, addEventListener() {}, querySelectorAll: () => []},
   console, window: {addEventListener() {}, NeonAudio:{muted:false,play:(name)=>soundEvents.push(name)},
     NeonMusic:{muted:false,reset(){},setScene:name=>musicEvents.push(name)}}, assert, soundEvents, musicEvents, element,
 };
+vm.runInNewContext(fs.readFileSync(path.join(project,'circuit-model.js'),'utf8'),globals);
 vm.runInNewContext(fs.readFileSync(path.join(project,'mission.js'),'utf8'),globals);
 
 const source = fs.readFileSync(path.join(project,'game.js'), 'utf8');
@@ -42,6 +45,8 @@ const injected = source.slice(0,startup) + `
   assert.ok(hp > 100);
   assert.equal(builds[1].charge, 0);
   const attack = builds[0];
+  assert.match(card({...nodes.find(n=>n.id==='haste'),choiceKind:'node'},0,'NODE'),/追加コストなし/);
+  assert.doesNotMatch(card({...nodes.find(n=>n.id==='haste'),choiceKind:'node'},0,'NODE'),/消費コスト -5%/);
   attack.nodes.push(nodes.find(n=>n.id==='discount'));
   assert.equal(costOf(attack), 34);
   attack.nodes.push(nodes.find(n=>n.id==='haste'));
