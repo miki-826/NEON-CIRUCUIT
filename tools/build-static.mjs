@@ -12,7 +12,7 @@ if (check.status !== 0) process.exit(check.status ?? 1);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 const entries = [
-  'index.html', 'game.js', 'render3d.js', 'effects.js', 'mission.js', 'sound.js',
+  'index.html', 'game.js', 'hover-motion.js', 'render3d.js', 'effects.js', 'mission.js', 'sound.js',
   'style.css', 'battle.css', 'hud.css', 'title.js', 'title.css', 'assets', 'vendor',
   'circuit-model.js', 'circuit-editor.js', 'circuit.css',
 ];
