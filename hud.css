@@ -236,6 +236,10 @@ body { font-family: var(--h-font-jp); }
 .touch-pad { display: none; left: calc(var(--h-gutter) + var(--h-safe-l)); bottom: calc(var(--h-gutter) + var(--h-safe-b) + 150px); }
 @media (pointer: coarse) { .touch-pad { display: block; } }
 
+.pressure-warning { position:absolute; top:100px; left:50%; transform:translateX(-50%); width:min(520px,90vw); padding:16px; border:1px solid #ff895f; background:#240d15ed; text-align:center; box-shadow:0 0 35px #ff61383d; pointer-events:none; }
+.pressure-warning[hidden] { display:none; }
+.pressure-warning strong { display:block; color:#ffba78; letter-spacing:.16em; font-size:20px; }
+.pressure-warning span { display:block; color:#ffe4d3; font-size:12px; margin-top:6px; }
 /* ---- Command menu (Esc) ------------------------------------------------ */
 .command {
   position: fixed; inset: 0; z-index: 20;

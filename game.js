@@ -216,6 +216,7 @@
   }
 
   function quitToTitle(){
+    $('pressureWarning').hidden=true;
     circuitEditor?.cancelDrag();
     $('command').hidden=true;
     $('app').inert=false;
@@ -289,7 +290,7 @@
     wave=1; round=1; roundTime=0; clock=0; lastUI=0; kills=0; level=1; xp=0; xpNeed=4;
     maxHp=selectedClass.hp; hp=maxHp;
     player={x:W/2,y:H/2,r:14,inv:0,angle:0,guardUntil:0,recoilUntil:0,recoilAngle:0,vx:0,vy:0};
-    enemies=[]; bullets=[]; effects=[]; builds=[]; inventory=[];
+    enemies=[]; enemyPool.length=0;retiredEnemies.length=0;nextRushAt=25;rushUntil=0;pressureUntil=0;batchSerial=0;swarmXp=0;$('pressureWarning').hidden=true; bullets=[]; effects=[]; builds=[]; inventory=[];
     zones=[]; hostileShots=[]; spawned=0; missionLog=[];
     frameEvents=[]; emit({type:'start'});
     addSkill(master);
@@ -348,7 +349,7 @@
   function bossReward(){choiceType='boss';choices=pick([...masters,...subs].filter(s=>!builds.some(b=>b.id===s.id)),3).map(o=>({...o,choiceKind:'skill'}));if(choices.length<3)choices.push(...pick(subs,3-choices.length).map(o=>({...o,choiceKind:'skill'})));state='choice';showChoices(`${bossName()}の報酬`,'ボスからマスター／サブスキルを1つ獲得。既に持っているスキルはランクが上がります。')}
   function advanceRound(){
     nextRoundPending=false;
-    enemies=[]; bullets=[]; hostileShots=[]; zones=[];
+    recycleEnemies(true); bullets=[]; hostileShots=[]; zones=[];
     roundTime=0; spawnClock=0; spawned=0; bossSpawned=false;
     if(round<3) round++;
     else {round=1;wave++;announceChapter()}
@@ -359,33 +360,61 @@
     updateUI();
   }
   function endRound(){if(nextRoundPending)return;if(round===3&&!bossSpawned){spawnEnemy(true);bossSpawned=true;return}if(enemies.length)return;nextRoundPending=true;if(round===3)bossReward();else advanceRound()}
-  function roundQuota(){return mode==='demo'?7+round*2+Math.floor(wave*1.6):Infinity}
-
-  function deploySquad(){
-    for(let count=0;count<round+2;count++) spawnEnemy();
+  const MAX_ENEMIES=180, enemyPool=[], retiredEnemies=[];
+  let nextRushAt=25, rushUntil=0, pressureUntil=0, batchSerial=0, swarmXp=0;
+  function encounterProfile(w=wave,seconds=clock){
+    const t=Math.max(0,seconds)/60, progress=Math.max(0,w-1);
+    return {interval:Math.max(.16,.98-progress*.067-t*.025),batch:Math.min(8,1+Math.floor(progress/2)+Math.floor(t/3)),
+      hpScale:(1+progress*.40+(round-1)*.13)*(1+.07*progress*progress+.025*Math.pow(t,1.3)),
+      damageScale:(1+w*.135)*(1+.025*Math.pow(progress,1.4)+.015*Math.pow(t,1.2))};
   }
-
-  const entryPorts=[[145,145],[480,96],[815,145],[865,300],[815,455],[480,504],[145,455],[95,300]];
-
-  function spawnEnemy(boss=false){
-    const openPorts=entryPorts.filter(([x,y])=>Math.hypot(x-player.x,y-player.y)>(boss?255:190));
-    const ports=openPorts.length?openPorts:entryPorts;
-    const [entryX,entryY]=ports[Math.floor(rand(0,ports.length))];
-    const x=entryX+rand(-24,24), y=entryY+rand(-24,24);
-    const scale=1+(wave-1)*.40+(round-1)*.13;
-    const bossFactor=wave===10?3.9:wave===5?2.2:1;
-    const elite=!boss && wave>=2 && Math.random()<.11+wave*.009;
-    const hunter=!boss && !elite && wave>=3 && Math.random()<.22;
-    const bossGrowth=boss?1+Math.max(0,level-5)*.14:1;
-    const health=(boss?235*bossFactor:elite?77:hunter?33:40)*scale*bossGrowth;
+  function roundQuota(){return mode==='demo'?14+wave*7+(round-1)*7:Infinity}
+  function pressureWarning(title,message){
+    pressureUntil=clock+3;
+    $('pressureWarning').hidden=false;$('pressureTitle').textContent=title;$('pressureText').textContent=message;
+    play('alert',.4);log(message);
+  }
+  function updatePressure(){
+    if(clock>=nextRushAt){nextRushAt=clock+45;rushUntil=clock+10;pressureWarning('WARNING · SWARM RUSH','大群接近。2秒後から8秒間、出現数が3倍になります。');}
+    if(clock>=pressureUntil)$('pressureWarning').hidden=true;
+  }
+  function rushing(){return clock>=rushUntil-8 && clock<rushUntil}
+  function retireEnemy(enemy){if(!enemy.pooled){enemy.pooled=true;retiredEnemies.push({enemy,readyAt:clock+7});}}
+  function recycleEnemies(all=false){
+    let write=0;for(const enemy of enemies){if(all||enemy.hp<=0)retireEnemy(enemy);else enemies[write++]=enemy;}enemies.length=write;
+    for(let i=retiredEnemies.length-1;i>=0;i--)if(retiredEnemies[i].readyAt<=clock){const entry=retiredEnemies.splice(i,1)[0];if(enemyPool.length<512)enemyPool.push(entry.enemy);}
+  }
+  function deploySquad(){spawnBatch(Math.min(6,round+2));}
+  function spawnBatch(override){
+    const profile=encounterProfile(), formation=batchSerial++%3===2?'flock':'ring';
+    const count=Math.min(MAX_ENEMIES-1-enemies.length,roundQuota()-spawned,override??(profile.batch*(rushing()?3:1)));
+    const groupSize=formation==='flock'&&wave>=3&&!override?Math.min(MAX_ENEMIES-1-enemies.length,roundQuota()-spawned,Math.max(count,18*(rushing()?3:1))):count;
+    const side=Math.floor(rand(0,4));for(let i=0;i<groupSize;i++)spawnEnemy(false,{formation,side,index:i,total:groupSize,role:formation==='flock'?'swarm':null});
+  }
+  function spawnEnemy(boss=false,entry={}){
+    if(enemies.length>=(boss?MAX_ENEMIES:MAX_ENEMIES-1))return false;
+    const profile=encounterProfile();
+    let role=entry.role;
+    if(boss)role='boss';
+    else if(!role){const roll=Math.random();role=wave>=2&&roll<.09?'tank':wave>=2&&roll<.19?'gunner':wave>=3&&roll<.32?'hunter':'swarm';}
+    const elite=role==='tank'||role==='gunner',hunter=role==='hunter';
+    // Preserve the original type/wave speed formula exactly; time and rush never affect speed.
     const speed=(boss?53:elite?71:hunter?123:rand(68,92))*(1+wave*.044);
-    const damage=(boss?23:elite?15:hunter?12:wave===1?6.5:9)*(1+wave*.135);
-    enemies.push({x,y,r:boss?31:elite?19:12,hp:health,max:health,speed,damage,boss,elite,hunter,
-      hit:0,attackIn:boss?1.2:rand(.65,1.8),aim:null,slowUntil:0});
-    effect('ring',x,y,boss?'#ff687f':hunter?'#ef8dff':'#ad83f1',.38,{r:boss?69:26});
+    const side=entry.formation==='flock'?entry.side:(entry.index??Math.floor(rand(0,4)))%4;
+    const along=entry.formation==='flock'?clamp((side%2?player.x:player.y)+rand(-75,75),30,side%2?W-30:H-30):rand(20,side%2?W-20:H-20);
+    const depth=28+rand(0,34);let x=side===0?-depth:side===2?W+depth:along,y=side===1?-depth:side===3?H+depth:along;
+    if(Math.hypot(x-player.x,y-player.y)<160){x=W-x;y=H-y;}
+    const bossFactor=wave===10?3.9:wave===5?2.2:1;
+    const health=(boss?235*bossFactor:role==='tank'?180:elite?77:hunter?33:14)*profile.hpScale*(boss?1+Math.max(0,level-5)*.14:1);
+    const damage=(boss?23:elite?15:hunter?12:wave===1?6.5:9)*profile.damageScale;
+    const enemy=enemyPool.pop()||{};
+    Object.assign(enemy,{x,y,r:boss?31:role==='tank'?25:elite?19:role==='swarm'?9:12,hp:health,max:health,speed,damage,boss,elite,hunter,role,
+      hit:0,attackIn:boss?1.2:rand(.65,1.8),aim:null,slowUntil:0,knockbackFactor:role==='tank'?.18:1,pooled:false});
+    enemies.push(enemy);
+    if(boss||elite)effect('ring',x,y,boss?'#ff687f':'#ffcf79',.38,{r:boss?69:30});
     emit({type:'spawn',x,y,boss,elite,hunter});
-    if(boss){log(`${bossName()}、出現`);play('alert',.48);emit({type:'shake',power:.6})}
-    else spawned++;
+    if(boss){pressureWarning('WARNING · BOSS INBOUND',bossName()+'、接近。重装ユニットに備えてください。');play('alert',.48);emit({type:'shake',power:.6});}else spawned++;
+    return enemy;
   }
   function nearest(max=Infinity){let found=null,d=max*max;for(const e of enemies){let n=(e.x-player.x)**2+(e.y-player.y)**2;if(e.hp>0&&n<d){d=n;found=e}}return found}
   function effect(type,x,y,color,duration,extra={}){
@@ -488,7 +517,7 @@
     if (stats?.leech) hp=Math.min(maxHp,hp+stats.leech);
     if (enemy.hp>0) return;
     kills++;
-    xp+=enemy.boss?16+wave*2:enemy.elite?4:1;
+    xp+=enemy.boss?16+wave*2:enemy.elite?4:enemy.role==='swarm'?(++swarmXp%2===0?1:0):1;
     effect('impact',enemy.x,enemy.y,enemy.boss?'#ffcf79':'#aa82ff',.35,{r:(enemy.r??12)*2.4});
     emit({type:'kill',x:enemy.x,y:enemy.y,boss:!!enemy.boss,elite:!!enemy.elite});
     if (enemy.boss || enemy.elite) emit({type:'shake',power:enemy.boss?1:.18});
@@ -537,8 +566,8 @@
       if (frost) enemy.slowUntil=clock+(1.6+(skill.rank-1)*.12)*stats.utilityPower;
       else if (!enemy.boss) {
         effect('trail',enemy.x,enemy.y,'#ff83b0',.24,{x2:x,y2:y});
-        enemy.x+=dx*Math.min(.9,.43*stats.utilityPower);
-        enemy.y+=dy*Math.min(.9,.43*stats.utilityPower);
+        enemy.x+=dx*Math.min(.9,.43*stats.utilityPower)*(enemy.knockbackFactor??1);
+        enemy.y+=dy*Math.min(.9,.43*stats.utilityPower)*(enemy.knockbackFactor??1);
       }
       hurtEnemy(enemy,damage,skill,stats);
     }
@@ -590,7 +619,7 @@
     const secondPhase=enemy.hp<enemy.max*.5;
     const radius=wave===10?76:wave===5?65:48;
     const duration=wave===10?.86:wave===5?1.02:1.18;
-    const damage=wave===10?56:wave===5?31:16+wave*1.1;
+    const damage=(wave===10?56:wave===5?31:16+wave*1.1)*encounterProfile().damageScale/(1+wave*.135);
     const danger={r:radius,t:duration,duration,color:'#ff687f',source:enemy,damage};
     zones.push({...danger,x:player.x,y:player.y,echo:wave>=5&&secondPhase});
     if (wave===10 && secondPhase) {
@@ -640,7 +669,22 @@
     return skillStats(skill).chargeRate;
   }
 
+  const enemyGrid=new Map(), gridCell=80;
+  function rebuildEnemyGrid(){
+    for(const bucket of enemyGrid.values())bucket.length=0;
+    for(const enemy of enemies)if(enemy.hp>0){const key=Math.floor(enemy.x/gridCell)+','+Math.floor(enemy.y/gridCell);let bucket=enemyGrid.get(key);if(!bucket){bucket=[];enemyGrid.set(key,bucket);}bucket.push(enemy);}
+  }
+  function nearbyBulletEnemies(x1,y1,x2,y2,padding){
+    const result=[];
+    for(let x=Math.floor((Math.min(x1,x2)-padding)/gridCell);x<=Math.floor((Math.max(x1,x2)+padding)/gridCell);x++)
+      for(let y=Math.floor((Math.min(y1,y2)-padding)/gridCell);y<=Math.floor((Math.max(y1,y2)+padding)/gridCell);y++){
+        const bucket=enemyGrid.get(x+','+y);if(bucket)for(const enemy of bucket)result.push(enemy);
+      }
+    return result;
+  }
   function updateBullets(dt){
+    rebuildEnemyGrid();
+    const maxEnemyRadius=enemies.reduce((r,e)=>Math.max(r,e.r||0),0);
     const pending=[];
     for (const bullet of bullets) {
       if (bullet.life<=0) continue;
@@ -659,7 +703,7 @@
       const dx=bullet.x-oldX,dy=bullet.y-oldY,lengthSquared=dx*dx+dy*dy;
       // Swept collision keeps high-speed projectiles from passing through enemies.
       const hits=[];
-      for (const enemy of enemies) {
+      for (const enemy of nearbyBulletEnemies(oldX,oldY,bullet.x,bullet.y,maxEnemyRadius+bullet.r)) {
         if (enemy.hp<=0 || bullet.hits.has(enemy)) continue;
         const along=lengthSquared ? clamp(((enemy.x-oldX)*dx+(enemy.y-oldY)*dy)/lengthSquared,0,1) : 0;
         if (Math.hypot(enemy.x-oldX-dx*along,enemy.y-oldY-dy*along)<enemy.r+bullet.r) hits.push({enemy,along});
@@ -752,19 +796,17 @@
     player.vy=dt>0?(player.y-previousY)/dt:0;
     if (dx||dy) player.angle=Math.atan2(dy,dx)+Math.PI/2;
 
+    updatePressure();
     spawnClock+=dt;
-    const interval=Math.max(.43,1.06-wave*.046-round*.052);
-    while (spawnClock>=interval) {
-      spawnClock-=interval;
-      if (roundTime<modeDefs[mode].rounds[round-1] && spawned<roundQuota() && enemies.length<90) spawnEnemy();
-    }
+    const interval=encounterProfile().interval;
+    while(spawnClock>=interval){spawnClock-=interval;if(roundTime<modeDefs[mode].rounds[round-1]&&spawned<roundQuota())spawnBatch();}
     for (const enemy of enemies) {
       if (enemy.hp<=0) continue;
       const angle=Math.atan2(player.y-enemy.y,player.x-enemy.x);
       const distance=Math.hypot(player.x-enemy.x,player.y-enemy.y);
-      if (enemy.elite) gunnerAttack(enemy,dt,distance);
+      if (enemy.elite && enemy.role!=='tank') gunnerAttack(enemy,dt,distance);
       if (distance<=enemy.r+player.r+1) hurtPlayer(enemy.damage);
-      else if (!enemy.aim && (!enemy.elite || distance>218)) {
+      else if (!enemy.aim && (!enemy.elite || enemy.role==='tank' || distance>218)) {
         const speed=enemy.speed*(enemy.slowUntil>clock?.49:1);
         enemy.x+=Math.cos(angle)*speed*dt;
         enemy.y+=Math.sin(angle)*speed*dt;
@@ -781,7 +823,7 @@
     updateZones(dt);
     if (state==='ended') return;
     activateSkills(dt);
-    enemies=enemies.filter(enemy=>enemy.hp>0);
+    recycleEnemies();
     if (xp>=xpNeed) { levelUp(); return; }
     const squadCleared=spawned>=roundQuota() && !enemies.length;
     if (roundTime>=modeDefs[mode].rounds[round-1] || squadCleared) endRound();
@@ -848,7 +890,7 @@
       const art = enemy.boss ? 'boss' : enemy.elite ? 'elite' : 'drone';
       const angle = enemy.boss ? (reducedMotion.matches ? 0 : clock * .25) :
         Math.atan2(player.y-enemy.y,player.x-enemy.x) + Math.PI/2;
-      const size = enemy.boss ? 110 : enemy.elite ? 60 : enemy.hunter ? 35 : 40;
+      const size = enemy.boss ? 110 : enemy.role==='tank' ? 78 : enemy.elite ? 60 : enemy.hunter ? 35 : 29;
       if (enemy.aim) {
         const {angle:heading,time}=enemy.aim;
         ctx.save();
@@ -1029,6 +1071,7 @@
   }
 
   function victory(){
+    $('pressureWarning').hidden=true;
     state='ended';
     updateMusic();
     $('pauseBtn').disabled=true;
@@ -1044,7 +1087,7 @@
     $('retry').onclick=menu;
     bindTitleButton();
   }
-  function defeat(){state='ended';updateMusic();updateBossBar();$('pauseBtn').disabled=true;$('transmission').hidden=true;show(`<div class="hero"><div><h2>SIGNAL <span>LOST</span></h2><p>回路停止</p></div></div><div class="overlay-content"><h3 class="overlay-title">戦闘終了</h3><div class="result-number">WAVE ${String(wave).padStart(2,'0')}</div><p class="overlay-desc">撃破 ${kills} / 到達レベル ${level}。次の回路で再挑戦できます。</p><div class="end-actions"><button class="primary-action" id="retry">再出撃</button>${titleButton()}</div></div>`);$('retry').onclick=menu;bindTitleButton()}
+  function defeat(){$('pressureWarning').hidden=true;state='ended';updateMusic();updateBossBar();$('pauseBtn').disabled=true;$('transmission').hidden=true;show(`<div class="hero"><div><h2>SIGNAL <span>LOST</span></h2><p>回路停止</p></div></div><div class="overlay-content"><h3 class="overlay-title">戦闘終了</h3><div class="result-number">WAVE ${String(wave).padStart(2,'0')}</div><p class="overlay-desc">撃破 ${kills} / 到達レベル ${level}。次の回路で再挑戦できます。</p><div class="end-actions"><button class="primary-action" id="retry">再出撃</button>${titleButton()}</div></div>`);$('retry').onclick=menu;bindTitleButton()}
   function pause(){
     if (state==='running') openCommand('build');
     else if (state==='paused') closeCommand();
