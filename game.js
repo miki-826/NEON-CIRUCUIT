@@ -6,16 +6,18 @@
 
   // ---- Settings (persisted) -------------------------------------------------
   const SETTINGS_KEY = 'neon-settings';
-  const defaultSettings = {quality:'medium', bloom:true, damageNumbers:true, shake:true, follow:true};
+  const defaultSettings = {quality:'medium', bloom:true, damageNumbers:true, shake:true, follow:true, effectOpacity:1};
   const settings = (() => {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch {}
     const valid = {...defaultSettings};
     if (['low','medium','high'].includes(saved.quality)) valid.quality = saved.quality;
+    if(typeof saved.effectOpacity==='number'&&Number.isFinite(saved.effectOpacity))valid.effectOpacity=clampOpacity(saved.effectOpacity);
     for (const key of ['bloom','damageNumbers','shake','follow']) if (typeof saved[key] === 'boolean') valid[key] = saved[key];
     return valid;
   })();
   function saveSettings(){ try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
+  function clampOpacity(value){return Math.max(0,Math.min(1,value));}
   const reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)');
   const renderSettings = () => ({...settings, reducedMotion: reducedMotionQuery.matches});
 
@@ -112,6 +114,8 @@
   function hide(){ $('overlay').classList.add('hidden') }
   // Reflects persisted settings + audio mute state onto the settings page controls.
   function syncSettingsUI(){
+    $('effectOpacity').value=Math.round(settings.effectOpacity*100);
+    $('effectOpacityValue').textContent=Math.round(settings.effectOpacity*100)+'%';
     const values = {...settings, music:!window.NeonMusic.muted, sfx:!window.NeonAudio.muted};
     document.querySelectorAll('#command .switch[data-setting]').forEach(button => {
       button.setAttribute('aria-checked', String(Boolean(values[button.dataset.setting])));
@@ -231,6 +235,7 @@
   }
 
   function bindCommandMenu(){
+    $('effectOpacity').oninput=event=>applySetting('effectOpacity',Number(event.target.value)/100);
     const command=$('command');
     command.querySelectorAll('[data-action="resume"]').forEach(button => button.onclick=closeCommand);
     command.querySelectorAll('.command-tab[data-tab]').forEach(button => button.onclick=()=>selectCommandTab(button.dataset.tab));
@@ -285,6 +290,7 @@
     return `<button class="choice" data-choice="${index}">${art}<span class="choice-kicker">${kicker}</span><strong>${option.name}</strong><p>${option.desc}</p><span class="choice-bottom">${detail}</span></button>`;
   }
   function start(master){
+    window.NeonFX?.reset?.();
     window.NeonMusic.reset();
     syncSettingsUI();
     wave=1; round=1; roundTime=0; clock=0; lastUI=0; kills=0; level=1; xp=0; xpNeed=4;
@@ -419,6 +425,7 @@
   function nearest(max=Infinity){let found=null,d=max*max;for(const e of enemies){let n=(e.x-player.x)**2+(e.y-player.y)**2;if(e.hp>0&&n<d){d=n;found=e}}return found}
   function effect(type,x,y,color,duration,extra={}){
     if (effects.length >= 180) return;
+    if(type==='impact'&&(extra.r||0)>=70)emit({type:'shake',power:Math.min(.22,(extra.r||0)/1800)});
     effects.push({type,x,y,color,t:duration,duration,...extra});
   }
 
@@ -436,6 +443,7 @@
     player.angle=angle+Math.PI/2;
     player.recoilAngle=angle;
     player.recoilUntil=clock+.16;
+    if(!['pulse','volley','seeker'].includes(skill.id))effect('muzzle',player.x+Math.cos(angle)*17,player.y+Math.sin(angle)*17,colorOf(skill),.16,{r:22,angle});
 
     if (skill.id==='orbital') {
       zones.push({x:target.x,y:target.y,r:stats.radius,t:.55,duration:.55,color:'#ffd081',skill,stats,damage});
@@ -483,7 +491,7 @@
     const homing=stats.homing;
     const speed=stats.projectileSpeed;
     const muzzleX=player.x+Math.cos(angle)*17, muzzleY=player.y+Math.sin(angle)*17;
-    effect('sparks',muzzleX,muzzleY,colorOf(skill),.15,{r:19,count:5,angle});
+    effect('muzzle',muzzleX,muzzleY,colorOf(skill),.16,{r:19,count:5,angle});
     for (let index=0; index<count; index++) {
       const heading=angle+(index-(count-1)/2)*spread;
       bullets.push({x:muzzleX,y:muzzleY,vx:Math.cos(heading)*speed,vy:Math.sin(heading)*speed,
@@ -509,7 +517,7 @@
     if (enemy.hp<=0) return;
     enemy.hp-=damage;
     if (!enemy.hit) {
-      effect('sparks',enemy.x,enemy.y,skill?colorOf(skill):'#f4f5ff',.18,{r:enemy.r??12,count:4,angle:clock});
+      effect('hit',enemy.x,enemy.y,skill?colorOf(skill):'#f4f5ff',.32,{r:enemy.r??12,count:4,angle:clock});
       play('hit',.12);
     }
     enemy.hit=.12;
@@ -881,6 +889,10 @@
   }
 
   function draw2d(){
+    window.NeonFX.beginFrame(effects,clock,settings,reducedMotion.matches);
+    ctx.fillStyle='#0a1629';ctx.fillRect(0,0,W,H);
+    ctx.save();
+    if(settings.shake&&!reducedMotion.matches){const power=window.NeonFX.shake*2;ctx.translate(Math.sin(clock*59)*power,Math.cos(clock*67)*power);}
     ctx.fillStyle='#0a1629';
     ctx.fillRect(0,0,W,H);
     if (arenaArt.naturalWidth) ctx.drawImage(arenaArt,0,0,W,H);
@@ -922,32 +934,9 @@
       }
     }
     for (const zone of zones) window.NeonFX.telegraph(ctx,zone);
-    for (const shot of hostileShots) {
-      ctx.strokeStyle='#ff8b62';
-      ctx.lineWidth=5;
-      ctx.lineCap='round';
-      ctx.beginPath();
-      ctx.moveTo(shot.x-shot.vx*.065,shot.y-shot.vy*.065);
-      ctx.lineTo(shot.x,shot.y);
-      ctx.stroke();
-      ctx.fillStyle='#fff0cd';
-      ctx.beginPath();
-      ctx.arc(shot.x,shot.y,3,0,TAU);
-      ctx.fill();
-    }
-    for (const bullet of bullets) {
-      ctx.strokeStyle=bullet.color;
-      ctx.lineWidth=bullet.r;
-      ctx.lineCap='round';
-      ctx.beginPath();
-      ctx.moveTo(bullet.x-bullet.vx*.036,bullet.y-bullet.vy*.036);
-      ctx.lineTo(bullet.x,bullet.y);
-      ctx.stroke();
-      ctx.fillStyle='#edfcff';
-      ctx.beginPath();
-      ctx.arc(bullet.x,bullet.y,bullet.r*.58,0,TAU);
-      ctx.fill();
-    }
+    const visualSettings={...settings,reducedMotion:reducedMotion.matches};
+    for(const shot of hostileShots)window.NeonFX.drawProjectile(ctx,shot,clock,visualSettings);
+    for(const bullet of bullets)window.NeonFX.drawProjectile(ctx,bullet,clock,visualSettings);
     const orbit=builds.find(s=>s.id==='orbit');
     if (orbit) {
       const count=Math.min(32,2+orbit.rank+skillStats(orbit).bonusProjectiles);
@@ -993,8 +982,9 @@
         ctx.font='700 14px Exo 2';
         ctx.fillText(visual.text,visual.x,visual.y-(reducedMotion.matches?0:(.43-visual.t)*35));
         ctx.restore();
-      } else window.NeonFX.draw(ctx,visual,reducedMotion.matches);
+      } else window.NeonFX.draw(ctx,visual,reducedMotion.matches,settings.effectOpacity);
     }
+    window.NeonFX.drawParticles(ctx,settings);ctx.restore();
   }
   function updateBossBar(){
     const boss=enemies.find(enemy=>enemy.boss && enemy.hp>0);

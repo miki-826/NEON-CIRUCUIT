@@ -130,7 +130,7 @@
     let renderer;
     try { renderer = new T.WebGLRenderer({ canvas, context, antialias:false, powerPreference:'high-performance' }); }
     catch (_) { return null; }
-    const cfg = {quality:'medium',bloom:true,shake:true,damageNumbers:true,follow:true,reducedMotion:false,...settings};
+    const cfg = {quality:'medium',bloom:true,shake:true,damageNumbers:true,follow:true,reducedMotion:false,effectOpacity:1,...settings};
     renderer.outputColorSpace=T.SRGBColorSpace;
     renderer.toneMapping=T.ACESFilmicToneMapping; renderer.toneMappingExposure=.95;
     renderer.shadowMap.type=T.PCFShadowMap;
@@ -676,12 +676,12 @@
     const dome=mesh(G(new T.SphereGeometry(1,24,16)),M(new T.ShaderMaterial({uniforms:{uColor:{value:new T.Color(C.mint)}},vertexShader:domeVertex,fragmentShader:domeFragment,transparent:true,depthWrite:false,side:T.DoubleSide})),scene);
     dome.visible=false;dome.scale.set(2.4,2.4,2.4);
     const orbitMeshes=[];for(let i=0;i<12;i++){const b=mesh(blade,mViolet,scene);b.visible=false;orbitMeshes.push(b);}
-    // Projectile cores and luminous velocity streaks are two instanced draws per team.
+    // White projectile cores, velocity streaks and colored halos use instanced draws.
     const bullets={};
     const bulletWhite=M(glow(0xffffff,.95));
     for(const kind of ['friendly','hostile','streak','hostileStreak','halo','hostileHalo']){
-      const geo=kind.includes('Streak')||kind==='streak'?cylinder:sphere;
-      const mat=kind==='hostile'||kind==='hostileStreak'?aura.orange:kind==='halo'?M(glow(C.cyan,.18)):kind==='hostileHalo'?M(glow(C.orange,.16)):bulletWhite;
+      const geo=kind==='halo'||kind==='hostileHalo'?sphere:cylinder;
+      const mat=kind==='halo'?M(glow(C.cyan,.24)):kind==='hostileHalo'?M(glow(C.orange,.22)):bulletWhite;
       const inst=new T.InstancedMesh(geo,mat,512);inst.count=0;inst.instanceMatrix.setUsage(T.DynamicDrawUsage);
       inst.frustumCulled=false;scene.add(inst);bullets[kind]=inst;
     }
@@ -697,6 +697,37 @@
       DUMMY.quaternion.setFromUnitVectors(UP,DIR);DUMMY.scale.set(r,length,r);
       DUMMY.updateMatrix();inst.setMatrixAt(i,DUMMY.matrix);
       COL.set(color);inst.setColorAt(i,COL);
+    }
+    const particlePool=new window.NeonCombatFX.ParticlePool(),projectileHistory=new window.NeonCombatFX.TrailCache();
+    function particleLayer(geometry,capacity,soft=false,smoke=false){
+      const geo=G(geometry.clone()),tints=new Float32Array(capacity*4);geo.setAttribute('aTint',new T.InstancedBufferAttribute(tints,4).setUsage(T.DynamicDrawUsage));
+      const mat=M(new T.ShaderMaterial({uniforms:{uOpacity:{value:1},uSoft:{value:soft?1:0},uSmoke:{value:smoke?1:0}},
+        vertexShader:'attribute vec4 aTint;varying vec4 vTint;varying vec2 vUV;void main(){vTint=aTint;vUV=uv;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.);}',
+        fragmentShader:'uniform float uOpacity,uSoft,uSmoke;varying vec4 vTint;varying vec2 vUV;void main(){float r=length(vUV*2.-1.);float edge=mix(1.,pow(max(0.,1.-r),1.4),uSoft);float cloud=1.-uSmoke*.2*sin(vUV.x*19.+vUV.y*13.)*sin(vUV.y*21.);float a=vTint.a*uOpacity*edge*cloud;if(a<.002)discard;gl_FragColor=vec4(vTint.rgb*mix(2.2,1.,uSmoke),a);}',
+        // Soft billboards extend below their origin; avoid hard floor intersections.
+        transparent:true,depthWrite:false,depthTest:!soft,blending:smoke?T.NormalBlending:T.AdditiveBlending,side:T.DoubleSide}));
+      const inst=new T.InstancedMesh(geo,mat,capacity);inst.count=0;inst.frustumCulled=false;inst.instanceMatrix.setUsage(T.DynamicDrawUsage);scene.add(inst);
+      return {inst,tints,count:0,capacity};
+    }
+    const particleLayers={flash:particleLayer(disc,1536,true),wave:particleLayer(ring,1536),spark:particleLayer(cylinder,1536),smoke:particleLayer(disc,1536,true,true),mote:particleLayer(disc,1536,true)};
+    const ribbonLayer=particleLayer(cylinder,7168),bulletMotes=particleLayer(disc,2048,true);
+    function putParticle(layer,color,alpha){
+      if(layer.count>=layer.capacity)return;
+      const i=layer.count++;DUMMY.updateMatrix();layer.inst.setMatrixAt(i,DUMMY.matrix);
+      layer.tints[i*4]=color.r;layer.tints[i*4+1]=color.g;layer.tints[i*4+2]=color.b;layer.tints[i*4+3]=alpha;
+    }
+    function finishParticleLayer(layer){layer.inst.count=layer.count;layer.inst.instanceMatrix.needsUpdate=true;layer.inst.geometry.attributes.aTint.needsUpdate=true;layer.inst.material.uniforms.uOpacity.value=cfg.effectOpacity;}
+    function syncParticles(){
+      particlePool.setQuality(cfg.quality);
+      for(const layer of Object.values(particleLayers))layer.count=0;
+      for(const p of particlePool.active){
+        const layer=particleLayers[p.kind];DUMMY.position.set(wx(p.x,arena.w),p.h/10,wz(p.y,arena.h));
+        if(p.kind==='wave'){DUMMY.rotation.set(-HALF,0,0);DUMMY.scale.set(p.size/10,p.size/10,1);}
+        else if(p.kind==='spark'){DIR.set(p.vx,p.vh-160*p.age,p.vy).normalize();DUMMY.quaternion.setFromUnitVectors(UP,DIR);DUMMY.scale.set(p.size/10,p.length/10,p.size/10);}
+        else {DUMMY.quaternion.copy(camera.quaternion);DUMMY.rotateZ(p.rotation);DUMMY.scale.set(p.size/5,p.size/5,1);}
+        COL.setRGB(p.red,p.green,p.blue);putParticle(layer,COL,p.alpha);
+      }
+      for(const layer of Object.values(particleLayers))finishParticleLayer(layer);
     }
     const zones=new Map(),zonePool=[];
     function newZone(){
@@ -717,7 +748,8 @@
       for(const [key,v] of zones)if(!v.seen){v.mesh.visible=false;zonePool.push(v.mesh);zones.delete(key);}
     }
     const effects=new Map(),effectPool={ring:[],impact:[],sparks:[],trail:[],arc:[],slash:[],text:[]};
-    const fxSeen=new WeakSet();
+    let fxSeen=new WeakSet();
+    const scaledEffectMaterials=new Set();
     const scorch=[];for(let i=0;i<24;i++){const mark=mesh(disc,M(new T.MeshBasicMaterial({map:contactMap,color:0x05080c,transparent:true,opacity:0,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2})),scene);
       mark.rotation.x=-HALF;mark.visible=false;scorch.push({mark,age:0});}
     let scorchNext=0;
@@ -761,14 +793,22 @@
       effects.set(e,v);return v;
     }
     function syncEffects(frame,dt){
-      for(const e of frame.effects||[]){if(!fxSeen.has(e)){fxSeen.add(e);startEffect(e);}}
+      particlePool.update(['running','title','menu','master'].includes(frame.state)?dt:0);
+      for(const e of frame.effects||[])if(!fxSeen.has(e)){
+        fxSeen.add(e);
+        if(['impact','hit','muzzle','sparks'].includes(e.type)){
+          particlePool.emit(e.type,e,{quality:cfg.quality,reducedMotion:cfg.reducedMotion});
+          if(e.type==='impact')paintScorch(wx(e.x,arena.w),wz(e.y,arena.h),Math.min(15,(e.r||25)/10));
+        }else startEffect(e);
+      }
+      scaledEffectMaterials.clear();
       for(const [e,v] of effects){
         v.age+=dt;const remain=clamp(e.t/e.duration,0,1);const progress=1-remain;
         if(v.type==='text'){
           v.object.visible=cfg.damageNumbers;v.object.position.set(wx(e.x,arena.w),3+progress*2,wz(e.y,arena.h));
           v.object.material.opacity=remain;
         }else{
-          const root=v.object;root.position.set(wx(e.x,arena.w),0,wz(e.y,arena.h));
+          const root=v.object;root.traverse(o=>{if(o.isMesh)o.material.opacity=1;});root.position.set(wx(e.x,arena.w),0,wz(e.y,arena.h));
           if(v.type==='ring'||v.type==='impact'){
             const scale=Math.max(.1,(e.r||30)/10*(.25+progress*.75));v.main.scale.setScalar(scale);
             v.main.material.opacity=remain*.72;
@@ -812,6 +852,7 @@
               outer.scale.set(.48*remain,len,.48*remain);outer.material.opacity=remain*.27;}
           }
         }
+        if(v.type!=='text')v.object.traverse(o=>{if(o.isMesh&&!scaledEffectMaterials.has(o.material)){scaledEffectMaterials.add(o.material);o.material.opacity*=cfg.effectOpacity;}});
         if(e.t<=0){v.object.visible=false;effectPool[v.type].push(v);effects.delete(e);}
       }
     }
@@ -848,14 +889,14 @@
       if(aoPass)aoPass.enabled=cfg.quality==='high';
       if(bloomPass)bloomPass.enabled=!!cfg.bloom;
       if(smaaPass)smaaPass.enabled=cfg.quality!=='low';
+      cfg.effectOpacity=window.NeonCombatFX.opacity(cfg.effectOpacity);particlePool.setQuality(cfg.quality);
       resize();
     }
     setSettings({});
     function pulseLight(x,z,color,power=1){let slot=blastLights[0];for(const b of blastLights)if(b.t<slot.t)slot=b;
       slot.t=.28*power;slot.light.position.set(x,2,z);slot.light.color.set(color);slot.light.intensity=70*power;}
-    const muzzleFlash=mesh(sphere,M(glow(C.cyan,.9)),scene);muzzleFlash.visible=false;
     const levelColumn=mesh(cylinder,M(glow(C.cyan,.32)),scene);levelColumn.scale.set(1.5,5,1.5);levelColumn.position.y=2.5;levelColumn.visible=false;
-    let muzzleTime=0,levelTime=0;
+    let levelTime=0;
     const bursts=[],burstPool=[];
     function burst(x,z,color,radius){
       let v=burstPool.pop();if(!v){
@@ -871,33 +912,35 @@
     function updateBursts(dt){
       for(let i=bursts.length-1;i>=0;i--){const v=bursts[i];v.t-=dt;
         const p=1-clamp(v.t,0,1);v.wave.scale.setScalar(v.radius*(.15+p*2));
-        v.wave.material.opacity=Math.max(0,1-p*2.6)*.85;
+        v.wave.material.opacity=Math.max(0,1-p*2.6)*.85*cfg.effectOpacity;
         for(let j=0;j<v.shards.length;j++){const a=j*TAU/v.shards.length,s=v.shards[j];
           const y=1.2+7*p-18*p*p;
           s.position.set(Math.cos(a)*v.radius*p,Math.max(.17,y<0?(-y)*.22:.17+y),Math.sin(a)*v.radius*p);
-          s.rotation.set(p*12,a+p*8,p*7);s.material.opacity=(1-p)*.9;
+          s.rotation.set(p*12,a+p*8,p*7);s.material.opacity=(1-p)*.9*cfg.effectOpacity;
         }
         if(v.t<=0){v.root.visible=false;burstPool.push(v);bursts.splice(i,1);}
       }
     }
     function handleEvents(frame){for(const ev of frame.events||[]){
       if(ev.type==='start'){
+        particlePool.clear();projectileHistory.clear();fxSeen=new WeakSet();
         for(const v of enemyMap.values())releaseEnemy(v);enemyMap.clear();
         for(const v of retired)releaseEnemy(v);retired.length=0;
         for(const [e,v] of effects){v.object.visible=false;effectPool[v.type].push(v);}effects.clear();
         for(const v of bursts){v.root.visible=false;burstPool.push(v);}bursts.length=0;trauma=0;
+        for(const v of scorch){v.age=0;v.mark.visible=false;}scorchNext=0;
+        for(const b of blastLights){b.t=0;b.light.intensity=0;}hurt=0;levelTime=0;levelColumn.visible=false;
       }else if(ev.type==='shake'){if(cfg.shake&&!cfg.reducedMotion)trauma=clamp(trauma+ev.power*.65,0,1);}
       else if(ev.type==='hurt'){hurt=ev.guard?.3:1;}
       else if(ev.type==='kill'){
         pulseLight(wx(ev.x,arena.w),wz(ev.y,arena.h),ev.boss?C.red:ev.elite?C.amber:C.violet,ev.boss?2:1);
-        burst(wx(ev.x,arena.w),wz(ev.y,arena.h),ev.boss?C.red:ev.elite?C.amber:C.violet,ev.boss?5:2.3);
         if(ev.boss&&!cfg.reducedMotion)trauma=Math.max(trauma,.8);
       }else if(ev.type==='spawn'){
         let best=null,dist=Infinity;for(const p of portGroups){const dx=p.group.position.x-wx(ev.x,arena.w),dz=p.group.position.z-wz(ev.y,arena.h),d=dx*dx+dz*dz;if(d<dist){dist=d;best=p;}}
         if(best&&dist<160)best.t=.65;
-        burst(wx(ev.x,arena.w),wz(ev.y,arena.h),ev.boss?C.red:ev.elite?C.amber:C.violet,ev.boss?3:1.6);
+        if(ev.boss||ev.elite)particlePool.emit('sparks',{x:ev.x,y:ev.y,r:20,color:ev.boss?'#ff4d6a':'#ffcf79'},{quality:cfg.quality,reducedMotion:cfg.reducedMotion});
       }else if(ev.type==='levelup'){pulseLight(currentPlayer.root.position.x,currentPlayer.root.position.z,C.cyan,1.4);burst(currentPlayer.root.position.x,currentPlayer.root.position.z,C.cyan,3);levelColumn.position.set(currentPlayer.root.position.x,3,currentPlayer.root.position.z);levelColumn.visible=true;levelTime=.7;}
-      else if(ev.type==='cast'){const x=wx(ev.x,arena.w),z=wz(ev.y,arena.h);pulseLight(x,z,C.cyan,.7);muzzleFlash.position.set(x,2,z);muzzleFlash.visible=true;muzzleTime=.12;}
+      else if(ev.type==='cast'){const x=wx(ev.x,arena.w),z=wz(ev.y,arena.h);pulseLight(x,z,C.cyan,.7);}
     }}
     function syncEnemies(frame,dt){
       for(const v of enemyMap.values())v.seen=false;
@@ -1033,25 +1076,33 @@
       }
     }
     function syncBullets(frame){
-      let n=0,s=0;const friendly=bullets.friendly,streak=bullets.streak,halo=bullets.halo;
-      for(const b of frame.bullets||[]){if(n>=512)break;const x=wx(b.x,arena.w),z=wz(b.y,arena.h),vel=Math.hypot(b.vx||0,b.vy||0),angle=Math.atan2(b.vx||0,b.vy||0),r=Math.max(.14,(b.r||4)/10);
-        putInstance(friendly,n,x,.9,z,r,r,r,b.color||C.cyan);
-        putInstance(halo,n,x,.9,z,r*2.5,r*2.5,r*2.5,b.color||C.cyan);n++;
-        putStreak(streak,s,x-(b.vx||0)/Math.max(vel,1)*.5,.9,z-(b.vy||0)/Math.max(vel,1)*.5,b.vx||0,b.vy||-1,.75+vel/550,r*.45,b.color||C.cyan);s++;
+      ribbonLayer.count=0;bulletMotes.count=0;
+      for(const [list,hostile] of [[frame.bullets||[],false],[frame.hostileShots||[],true]]){
+        const body=hostile?bullets.hostile:bullets.friendly,halo=hostile?bullets.hostileHalo:bullets.halo,streak=hostile?bullets.hostileStreak:bullets.streak;
+        let n=0;
+        for(const b of list){
+          if(n>=512)break;
+          const x=wx(b.x,arena.w),z=wz(b.y,arena.h),speed=Math.hypot(b.vx||0,b.vy||0)||1,r=Math.max(.1,(b.r||3)/10),height=hostile?.65:1.05;
+          const dx=(b.vx||0)/speed,dz=(b.vy||0)/speed,color=b.color||'#ff9a55';
+          putStreak(body,n,x,height,z,b.vx||0,b.vy||1,.24+speed*.00045,r*.43,0xffffff);
+          DUMMY.position.set(x-dx*.15,height,z-dz*.15);DIR.set(dx,0,dz);DUMMY.quaternion.setFromUnitVectors(UP,DIR);DUMMY.scale.set(r*1.8,.5+speed*.0006,r*1.8);DUMMY.updateMatrix();halo.setMatrixAt(n,DUMMY.matrix);COL.set(color);halo.setColorAt(n,COL);
+          putStreak(streak,n,x-dx*.35,height,z-dz*.35,dx,dz,.6+speed*.0008,r*.22,0xffffff);
+          const history=projectileHistory.update(b,frame.time||0),segments=cfg.reducedMotion?0:Math.min(history.count-1,cfg.quality==='low'?2:7);
+          for(let i=0;i<segments;i++){
+            const p=projectileHistory.point(history,i),q=projectileHistory.point(history,i+1),sx=(p.x-q.x)/10,sz=(p.y-q.y)/10,length=Math.hypot(sx,sz);
+            if(length<.001)continue;
+            DUMMY.position.set(wx((p.x+q.x)/2,arena.w),height,wz((p.y+q.y)/2,arena.h));DIR.set(sx,0,sz).normalize();DUMMY.quaternion.setFromUnitVectors(UP,DIR);DUMMY.scale.set(r*(1-i/8)*.8,length,r*(1-i/8)*.8);COL.set(color);putParticle(ribbonLayer,COL,(1-i/8)*.36);
+            if(cfg.quality!=='low'&&i%3===1){const drift=Math.sin((frame.time||0)*9+n*.7+i)*.12;
+              DUMMY.position.set(wx(q.x,arena.w)+drift,height-.05*i,wz(q.y,arena.h)-drift);DUMMY.quaternion.copy(camera.quaternion);DUMMY.scale.set(.10,.10,1);putParticle(bulletMotes,COL,(1-i/8)*.45);
+            }
+          }
+          n++;
+        }
+        body.count=halo.count=n;streak.count=cfg.reducedMotion?0:n;
+        for(const inst of [body,halo,streak]){inst.instanceMatrix.needsUpdate=true;if(inst.instanceColor)inst.instanceColor.needsUpdate=true;}
+        halo.material.opacity=(hostile?.22:.24)*cfg.effectOpacity;
       }
-      friendly.count=n;halo.count=n;streak.count=s;friendly.instanceMatrix.needsUpdate=true;halo.instanceMatrix.needsUpdate=true;streak.instanceMatrix.needsUpdate=true;
-      if(friendly.instanceColor)friendly.instanceColor.needsUpdate=true;
-      if(halo.instanceColor)halo.instanceColor.needsUpdate=true;
-      if(streak.instanceColor)streak.instanceColor.needsUpdate=true;
-      n=0;s=0;for(const b of frame.hostileShots||[]){if(n>=512)break;
-        const x=wx(b.x,arena.w),z=wz(b.y,arena.h),vel=Math.hypot(b.vx||0,b.vy||0);
-        putInstance(bullets.hostile,n++,x,.2,z,.25,.25,.25,C.orange);
-        putStreak(bullets.hostileStreak,s++,x-(b.vx||0)/Math.max(vel,1)*.26,.2,
-          z-(b.vy||0)/Math.max(vel,1)*.26,b.vx||0,b.vy||-1,.52,.055,C.orange);
-      }
-      bullets.hostile.count=n;bullets.hostileHalo.count=0;bullets.hostileStreak.count=s;
-      bullets.hostile.instanceMatrix.needsUpdate=true;bullets.hostileHalo.instanceMatrix.needsUpdate=true;bullets.hostileStreak.instanceMatrix.needsUpdate=true;
-      if(bullets.hostileHalo.instanceColor)bullets.hostileHalo.instanceColor.needsUpdate=true;
+      bulletWhite.opacity=.95*cfg.effectOpacity;finishParticleLayer(ribbonLayer);finishParticleLayer(bulletMotes);
     }
     function updateCamera(frame,dt){
       const aspect=width/height, fov=camera.fov*Math.PI/180,pitch=50*Math.PI/180;
@@ -1072,7 +1123,7 @@
       camTarget.x=lerp(camTarget.x,tx,smooth(5,dt));camTarget.z=lerp(camTarget.z,tz,smooth(5,dt));
       const idle=frame.state==='title'||frame.state==='menu'||frame.state==='master';
       const orbit=idle&&!cfg.reducedMotion?Math.sin(elapsed*.18)*.12:0;
-      let sx=0,sy=0,sz=0;if(trauma>0&&cfg.shake&&!cfg.reducedMotion){const power=trauma*trauma; sx=(Math.random()-.5)*power*2;sy=(Math.random()-.5)*power;sz=(Math.random()-.5)*power*2;}
+      let sx=0,sy=0,sz=0;if(trauma>0&&cfg.shake&&!cfg.reducedMotion){const power=trauma*trauma; sx=Math.sin(elapsed*61)*power;sy=Math.sin(elapsed*73+.8)*power*.5;sz=Math.sin(elapsed*67+1.7)*power;}
       camera.position.set(camTarget.x+Math.sin(orbit)*dist*.4+sx,Math.sin(pitch)*dist+sy,camTarget.z+Math.cos(pitch)*dist+sz);
       look.set(camTarget.x,0,camTarget.z);camera.lookAt(look);
     }
@@ -1082,19 +1133,19 @@
       unitMats.drone.line.emissiveIntensity=2.1+Math.sin(elapsed*4.2)*.4;
       unitMats.hunter.line.emissiveIntensity=2.3+Math.sin(elapsed*5.1)*.3;
       resize();handleEvents(frame);syncPlayer(frame,dt);syncEnemies(frame,dt);
-      syncBullets(frame);syncZones(frame,elapsed);syncEffects(frame,dt);
-      updateBursts(dt);
-      for(const v of scorch)if(v.age>0){v.age-=dt;v.mark.material.opacity=clamp(v.age/6,0,1)*.62;if(v.age<=0)v.mark.visible=false;}
+      syncBullets(frame);syncZones(frame,elapsed);syncEffects(frame,dt);syncParticles();
+      const fxDt=['running','title','menu','master'].includes(frame.state)?dt:0;
+      updateBursts(fxDt);
+      for(const v of scorch)if(v.age>0){v.age-=fxDt;v.mark.material.opacity=clamp(v.age/6,0,1)*.62*cfg.effectOpacity;if(v.age<=0)v.mark.visible=false;}
       for(const p of portGroups){p.t=Math.max(0,p.t-dt);p.flare.visible=p.t>0;if(p.t>0){p.flare.scale.setScalar(2.9+(1-p.t/.65)*2);p.group.rotation.y+=dt*1.7;}
         const open=p.t>0?Math.sin(Math.PI*clamp(p.t/.65,0,1))*1.2:0;
         for(let i=0;i<4;i++){const a=i*HALF;p.leaves[i].position.x=Math.cos(a)*(.62+open);p.leaves[i].position.z=Math.sin(a)*(.62+open);}}
-      for(const b of blastLights){b.t=Math.max(0,b.t-dt);b.light.intensity=b.t>0?70*b.t/.28:0;}
+      for(const b of blastLights){b.t=Math.max(0,b.t-dt);b.light.intensity=b.t>0?70*b.t/.28*cfg.effectOpacity:0;}
       trauma=Math.max(0,trauma-dt*1.7);hurt=Math.max(0,hurt-dt*2.3);
       core.material=frame.bossActive?mRed:mCyan;coreRing.rotation.y+=dt*.22;
       bossLight.intensity=frame.bossActive?38:0;
       for(const e of frame.enemies||[])if(e.boss){bossLight.position.set(wx(e.x,arena.w),4,wz(e.y,arena.h));break;}
-      if(muzzleTime>0){muzzleTime-=dt;muzzleFlash.scale.setScalar(1+muzzleTime*12);muzzleFlash.material.opacity=clamp(muzzleTime/.12,0,1);}else muzzleFlash.visible=false;
-      if(levelTime>0){levelTime-=dt;levelColumn.scale.y=5+(1-levelTime/.7)*10;levelColumn.material.opacity=levelTime/.7*.33;}else levelColumn.visible=false;
+      if(levelTime>0){levelTime-=fxDt;levelColumn.scale.y=5+(1-levelTime/.7)*10;levelColumn.material.opacity=levelTime/.7*.33*cfg.effectOpacity;}else levelColumn.visible=false;
       dust.position.y=Math.sin(elapsed*.18)*.3;
       updateCamera(frame,dt);
       if(gradePass){gradePass.uniforms.uTime.value=elapsed;gradePass.uniforms.uHurt.value=hurt;
@@ -1102,6 +1153,7 @@
       if(composer)composer.render(dt);else renderer.render(scene,camera);
     }
     function dispose(){if(disposed)return;disposed=true;
+      particlePool.clear();projectileHistory.clear();
       if(observer)observer.disconnect();window.removeEventListener('resize',resize);
       if(composer){for(const pass of composer.passes)if(pass.dispose)pass.dispose();composer.renderTarget1.dispose();composer.renderTarget2.dispose();}
       for(const v of enemyMap.values())releaseEnemy(v);
