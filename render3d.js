@@ -8,6 +8,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const lerp = (a, b, t) => a + (b - a) * t;
   const smooth = (rate, dt) => 1 - Math.exp(-rate * dt);
+  const isHoverPlayer=type=>['ranger','tank','assassin'].includes(type);
   const POS = new T.Vector3(), DIR = new T.Vector3(), UP = new T.Vector3(0, 1, 0);
   const DUMMY = new T.Object3D(), COL = new T.Color();
   const C = { cyan: 0x59e7ff, violet: 0xaa82ff, amber: 0xffcf79, red: 0xff4d6a,
@@ -524,10 +525,11 @@
       const model=A.SkeletonUtils.clone(g.scene);
       model.rotation.y=Math.PI; // GLB faces +Z, the unit rig faces -Z
       model.scale.setScalar(MODEL_SCALE[v.type]||1);
-      for(const c of v.tilt.children)c.visible=false;
+      for(const c of v.tilt.children)if(!c.userData.hoverFX)c.visible=false;
       v.tilt.add(model);v.model=model;
       const nodes={};model.traverse(o=>{if(o.name&&!nodes[o.name])nodes[o.name]=o;});
       v.nodes=nodes;v.chest=nodes.chest||null;
+      if(isHoverPlayer(v.type)&&v.chest)v.chestRest=v.chest.quaternion.clone();
       if(v.type!=='drone'&&v.type!=='hunter'){
         // Few of these exist at once, so they get their own materials for a hit flash.
         v.flashMats=[];
@@ -545,20 +547,21 @@
           let c=clip;
           // Firing only drives the upper body so it layers over the run cycle.
           if(clip.name==='Fire'){c=clip.clone();c.tracks=c.tracks.filter(t=>!LOWER_BODY.test(t.name.split('.')[0]));}
-          acts[clip.name]=mixer.clipAction(c);
+          if(!isHoverPlayer(v.type)||clip.name==='Fire')acts[clip.name]=mixer.clipAction(c);
         }
-        for(const k of ['Idle','Run','Walk'])if(acts[k]){acts[k].play();acts[k].setEffectiveWeight(k==='Idle'?1:0);}
+        if(!isHoverPlayer(v.type))for(const k of ['Idle','Run','Walk'])if(acts[k]){acts[k].play();acts[k].setEffectiveWeight(k==='Idle'?1:0);}
         if(acts.Fire){acts.Fire.setLoop(T.LoopOnce,1);acts.Fire.clampWhenFinished=false;}
         v.mixer=mixer;v.acts=acts;v.firePlaying=false;v.twist=0;
       }
     }
     function animateModel(v,dt,move,firing,twist){
       if(!v.mixer)return;
-      const run=v.acts.Run||v.acts.Walk,idle=v.acts.Idle,w=clamp(move,0,1);
+      const hover=isHoverPlayer(v.type),run=hover?null:v.acts.Run||v.acts.Walk,idle=hover?null:v.acts.Idle,w=clamp(move,0,1);
       if(run){run.setEffectiveWeight(w);run.setEffectiveTimeScale(.7+w*.45);}
       if(idle)idle.setEffectiveWeight(1-w);
       if(firing&&v.acts.Fire&&!v.firePlaying){v.acts.Fire.reset().setEffectiveWeight(1).play();v.firePlaying=true;}
       if(!firing)v.firePlaying=false;
+      if(hover&&v.chestRest)v.chest.quaternion.copy(v.chestRest);
       v.mixer.update(dt);
       if(v.chest&&twist)v.chest.rotateY(twist);
     }
@@ -580,6 +583,24 @@
       }
     }
 
+    function addHoverFX(v){
+      const color=v.type==='tank'?C.amber:v.type==='assassin'?C.violet:C.cyan;
+      const rig=new T.Group();rig.userData.hoverFX=true;v.tilt.add(rig);
+      const nozzleGeo=G(new T.CylinderGeometry(.16,.19,.16,12));
+      const flameGeo=G(new T.ConeGeometry(.17,1,12));
+      const nozzleMat=M(material(0x344956,color,.8,.25)),outer=M(glow(color,.48)),core=M(glow(0xedffff,.9));
+      const jets=[];
+      for(const [x,y,z,rear] of [[-.44,.28,.05,false],[.44,.28,.05,false],[-.32,1.25,.68,true],[.32,1.25,.68,true]]){
+        const pod=new T.Group();pod.position.set(x,y,z);if(rear)pod.rotation.x=-HALF;rig.add(pod);
+        mesh(nozzleGeo,nozzleMat,pod);
+        const auraJet=mesh(flameGeo,outer,pod),whiteJet=mesh(flameGeo,core,pod);
+        jets.push({aura:auraJet,core:whiteJet,rear});
+      }
+      // Floor attachments stay on root so lift and banking cannot lift the shadow/rings.
+      v.contact.material=M(shadowMat.clone());
+      const rings=[0,1].map(()=>floorRing(v.root,M(glow(color,.18)),1.4,.045));
+      v.hoverFX={rig,jets,outer,core,rings};
+    }
     function unit(type){
       const root=new T.Group(),tilt=new T.Group(),upper=new T.Group();root.add(tilt);tilt.add(upper);scene.add(root);
       const mats=unitMats[type],tpl=makeTemplate(type);
@@ -637,6 +658,7 @@
       }
       root.visible=false;
       const record={root,tilt,upper,legs,knees,arms,body,flash,eye,ground,contact,rotating,thrust,bar,aim,trail,crown,secondRing,pylons,petals,type,spawn:0,dead:0,seen:false,phase:0};
+      if(isHoverPlayer(type))addHoverFX(record);
       allUnits.push(record);upgradeUnit(record);
       return record;
     }
@@ -969,36 +991,40 @@
       if(currentPlayer!==playerModels[type])currentPlayer.root.visible=false;
       currentPlayer=playerModels[type];const v=currentPlayer;v.root.visible=true;
       const x=wx(p.x,arena.w),z=wz(p.y,arena.h),heading=(p.angle||0)-HALF;
-      v.root.position.set(x,0,z);v.root.rotation.y=lerp(v.root.rotation.y,-HALF-heading,smooth(18,dt));
-      v.root.scale.setScalar(1.35);
+      const live=['running','title','menu','master'].includes(frame.state);
+      const pose=window.NeonHover.step(v.hoverPose,p,dt,{live,reducedMotion:cfg.reducedMotion});v.hoverPose=pose;
+      v.root.position.set(x,0,z);v.root.rotation.y=pose.yaw;v.root.scale.setScalar(1.35);
       v.ground.scale.setScalar((p.r||14)/13.5);
-      const speed=Math.hypot(p.vx||0,p.vy||0);
-      v.phase+=dt*(1.6+speed*.033);
-      v.tilt.position.y=.11+Math.sin(v.phase*2)*(.035+Math.min(speed/1200,.11));
-      v.tilt.position.z=p.recoilUntil>frame.time?.32:0;
-      v.tilt.rotation.z=lerp(v.tilt.rotation.z,clamp((p.vx||0)/500,-.17,.17),smooth(9,dt));
-      v.tilt.rotation.x=lerp(v.tilt.rotation.x,clamp((p.vy||0)/500,-.16,.16),smooth(9,dt));
-      v.body.material=unitMats[type].shell;v.flash.visible=p.inv>0&&Math.floor(elapsed*16)%2===0;
-      if(v.legs){const swing=Math.min(.5,speed/360);for(let i=0;i<2;i++){v.legs[i].rotation.x=Math.sin(v.phase+i*Math.PI)*swing;
-        v.legs[i].rotation.z=Math.max(0,Math.cos(v.phase+i*Math.PI))*.12*swing;
-        if(v.knees)v.knees[i].rotation.x=Math.max(0,-Math.sin(v.phase+i*Math.PI))*.5*swing;}}
-      if(v.arms)for(let i=0;i<2;i++)v.arms[i].rotation.x=Math.sin(v.phase+i*Math.PI+Math.PI)*Math.min(.2,speed/1100);
-      v.upper.rotation.y=lerp(v.upper.rotation.y,p.recoilUntil>frame.time?(p.recoilAngle||0)*.22:0,smooth(12,dt));
-      if(Array.isArray(v.thrust))for(let i=0;i<v.thrust.length;i++){
-        const t=v.thrust[i];t.scale.setScalar(.78+speed/550+Math.sin(elapsed*17+i*2.1)*.08);}
-      v.ground.rotation.z+=dt*.22;
+      v.tilt.position.set(0,pose.height,p.recoilUntil>frame.time?.12:0);
+      v.tilt.rotation.set(pose.pitch,0,pose.roll);
+      v.body.material=unitMats[type].shell;v.flash.visible=!v.model&&p.inv>0&&Math.floor(elapsed*16)%2===0;
+      // Procedural fallback has a relaxed tucked stance, never a walking gait.
+      if(v.legs)for(const leg of v.legs)leg.rotation.set(-.10,0,0);
+      if(v.knees)for(const knee of v.knees)knee.rotation.set(.22,0,0);
+      if(v.arms)for(const arm of v.arms)arm.rotation.set(-.08,0,0);
+      v.upper.rotation.y=0;
+      if(Array.isArray(v.thrust))for(const jet of v.thrust)jet.visible=false;
+      const fx=v.hoverFX;
+      for(const jet of fx.jets){
+        const length=(jet.rear?.22:.28)+pose.thrust*(jet.rear?.85:.48);
+        jet.aura.scale.set(1+pose.thrust*.25,length,1+pose.thrust*.25);jet.aura.position.y=-.09-length*.5;
+        jet.core.scale.set(.42,length*.75,.42);jet.core.position.y=-.09-length*.375;
+      }
+      fx.outer.opacity=.35+pose.thrust*.28;fx.core.opacity=.72+pose.thrust*.2;
+      for(let i=0;i<fx.rings.length;i++){
+        const phase=cfg.reducedMotion?i*.5:(pose.time*.65+i*.5)%1;
+        fx.rings[i].scale.setScalar(1.15+phase*(.65+pose.thrust*.5));
+        fx.rings[i].material.opacity=(1-phase)*(.09+pose.thrust*.12);
+      }
+      v.contact.scale.set(2.7,2.7,1);v.contact.material.opacity=.62;
       if(v.model){
-        // Blender rig drives the body; keep only a light lean and a short recoil kick from the procedural motion.
-        v.tilt.position.y=0;v.tilt.position.z=p.recoilUntil>frame.time?.12:0;
         const firing=p.recoilUntil>frame.time;
-        let diff=0;
-        if(firing&&speed>20)diff=(((p.recoilAngle||0)-heading)%TAU+TAU*1.5)%TAU-Math.PI;
-        v.twist=lerp(v.twist||0,clamp(-diff,-.9,.9),smooth(14,dt));
-        const live=frame.state==='running'||frame.state==='title'||frame.state==='menu'||frame.state==='master';
-        animateModel(v,live?dt:0,speed/190,firing,v.twist);
+        const diff=firing?window.NeonHover.wrap((p.recoilAngle||0)-heading):0;
+        if(live)v.twist=lerp(v.twist||0,clamp(-diff,-.9,.9),smooth(14,dt));
+        animateModel(v,live?dt:0,0,firing,v.twist);
         if(v.flashMats){const on=p.inv>0&&Math.floor(elapsed*16)%2===0;for(const m of v.flashMats)m.emissiveIntensity=on?.4:0;}
       }
-      playerLight.position.set(x,2.2,z);playerLight.color.set(frame.classColor||'#59e7ff');
+      playerLight.intensity=16+pose.thrust*7;playerLight.position.set(x,2.2,z);playerLight.color.set(frame.classColor||'#59e7ff');
       dome.visible=!!(p.guardUntil>frame.time);dome.position.set(x,1.3,z);
       const orb=frame.orbit;for(let i=0;i<orbitMeshes.length;i++){
         const b=orbitMeshes[i];b.visible=!!orb&&i<orb.count;if(!b.visible)continue;

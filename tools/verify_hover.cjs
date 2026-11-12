@@ -1,0 +1,26 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),scope={window:{}};
+vm.runInNewContext(fs.readFileSync(path.join(root,'hover-motion.js'),'utf8'),scope);
+const {step,wrap}=scope.window.NeonHover;
+const player=Object.freeze({x:100,y:200,vx:190,vy:0,angle:Math.PI/2});
+const original=JSON.stringify(player);
+let state;for(let i=0;i<120;i++)state=step(state,player,1/60);
+assert.equal(JSON.stringify(player),original,'Visual movement must never mutate the game snapshot');
+assert.ok(state.height>.5&&state.height<.65);
+assert.ok(Math.abs(state.pitch)>.05||Math.abs(state.roll)>.05,'Movement must lean the body');
+const idle=Object.freeze({...player,vx:0});
+let idleState;const heights=[];for(let i=0;i<180;i++){idleState=step(idleState,idle,1/60);heights.push(idleState.height);}
+assert.ok(Math.max(...heights)-Math.min(...heights)>.08,'Idle hover must bob above the floor');
+assert.ok(state.thrust>idleState.thrust,'Movement must strengthen jets');
+const paused=step(state,player,.05,{live:false});assert.equal(paused,state,'Pause must freeze the visual state');
+const previous={...state,yaw:Math.PI-.01,roll:0};
+const turned=step(previous,{...idle,angle:Math.PI-.01},.016);
+assert.ok(Math.abs(wrap(turned.yaw-previous.yaw))<.02,'Heading must take the short path across PI');
+const bank=step({...state,yaw:0,roll:0},{...idle,angle:-1},.05);
+assert.ok(bank.roll<0&&bank.thrust>idleState.thrust,'Turns must bank and increase jet power');
+let reduced;for(let i=0;i<120;i++)reduced=step(reduced,player,1/60,{reducedMotion:true});
+assert.equal(reduced.height,.58);assert.equal(reduced.pitch,0);assert.equal(reduced.roll,0);
+let sixty,thirty;for(let i=0;i<60;i++)sixty=step(sixty,player,1/60);for(let i=0;i<30;i++)thirty=step(thirty,player,1/30);
+assert.ok(Math.abs(sixty.pitch-thirty.pitch)<.002&&Math.abs(sixty.thrust-thirty.thrust)<.002,'Smoothing must be time based');
+assert.ok(Object.values(step(state,player,Infinity)).every(Number.isFinite));
+console.log('Hover tests passed: immutable gameplay data, lift, idle bob, lean, banking, pause, reduced motion and time-based smoothing.');
