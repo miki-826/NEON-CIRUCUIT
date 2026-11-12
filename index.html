@@ -123,6 +123,7 @@
         <div class="settings-group">
           <h4>表示</h4>
           <div class="setting-row"><span class="setting-label" id="lblNumbers">ダメージ数値</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblNumbers" data-setting="damageNumbers"></button></div>
+          <div class="setting-row"><label class="setting-label" for="effectOpacity">エフェクトの濃さ<small>弾の光・火花・爆風・残煙に適用</small></label><input id="effectOpacity" type="range" min="0" max="100" step="5" value="100" aria-describedby="effectOpacityValue"><output id="effectOpacityValue" for="effectOpacity">100%</output></div>
           <div class="setting-row"><span class="setting-label" id="lblShake">画面の揺れ</span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblShake" data-setting="shake"></button></div>
           <div class="setting-row"><span class="setting-label" id="lblFollow">カメラ追従<small>オフにすると戦場全体を映します</small></span><button class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="lblFollow" data-setting="follow"></button></div>
         </div>
@@ -158,6 +159,7 @@
   <script src="vendor/models.js" onerror="window.NEON_MODELS=null"></script>
   <script src="mission.js"></script>
   <script src="sound.js"></script>
+  <script src="combat-fx.js"></script>
   <script src="effects.js"></script>
   <script src="hover-motion.js"></script>
   <script src="render3d.js"></script>

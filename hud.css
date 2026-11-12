@@ -351,6 +351,9 @@ body { font-family: var(--h-font-jp); }
 }
 .setting-label { font-size: 15px; font-weight: 500; }
 .setting-label small { display: block; margin-top: 2px; font-size: 12px; color: var(--h-dim); font-weight: 500; }
+.setting-row:has(#effectOpacity) { flex-wrap:wrap; gap:10px; }
+#effectOpacity { width:clamp(100px,25vw,200px); max-width:55%; accent-color:#59e7ff; }
+#effectOpacityValue { min-width:42px; font-size:12px; }
 .switch {
   position: relative; flex: none;
   width: 56px; height: 30px; padding: 0;
@@ -480,7 +483,6 @@ body { font-family: var(--h-font-jp); }
 
 /* 2D fallback: graphics options only apply to the 3D renderer */
 .is-2d .settings-graphics,
-.is-2d .setting-row:has([data-setting="shake"]),
 .is-2d .setting-row:has([data-setting="follow"]) { display: none; }
 @media (max-width: 767px) {
   .command-resume { min-height: 44px; margin: 0 0 6px; }
