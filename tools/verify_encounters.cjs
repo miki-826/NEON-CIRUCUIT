@@ -47,7 +47,7 @@ const cases = `
   enemies=enemies.filter(e=>!e.boss);
   const reused=spawnEnemy(false,{role:'swarm'});assert.equal(reused,old);assert.equal(reused.aim,null);assert.equal(reused.pooled,false);
   enemies=[];spawned=0;clock=25;nextRushAt=25;updatePressure();assert.equal(rushing(),false);
-  clock=27;assert.equal(rushing(),true);clock=35;assert.equal(rushing(),false);
+  clock=27;assert.equal(rushing(),true);enemies=[];spawned=0;batchSerial=2;spawnBatch();assert.equal(enemies.length,54);clock=35;assert.equal(rushing(),false);enemies=[];spawned=0;batchSerial=2;spawnBatch();assert.equal(enemies.length,18);
   mode='demo';wave=3;round=3;enemies=[];spawned=roundQuota();bossSpawned=false;nextRoundPending=false;endRound();
   assert.equal(bossSpawned,true);assert.equal(enemies.filter(e=>e.boss).length,1);endRound();assert.equal(enemies.length,1);
   mode='hour';enemies=[];wave=8;clock=300;spawned=0;

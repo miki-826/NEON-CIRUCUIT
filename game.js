@@ -388,7 +388,7 @@
   function spawnBatch(override){
     const profile=encounterProfile(), formation=batchSerial++%3===2?'flock':'ring';
     const count=Math.min(MAX_ENEMIES-1-enemies.length,roundQuota()-spawned,override??(profile.batch*(rushing()?3:1)));
-    const groupSize=formation==='flock'&&wave>=3&&!override?Math.min(MAX_ENEMIES-1-enemies.length,roundQuota()-spawned,Math.max(count,18)):count;
+    const groupSize=formation==='flock'&&wave>=3&&!override?Math.min(MAX_ENEMIES-1-enemies.length,roundQuota()-spawned,Math.max(count,18*(rushing()?3:1))):count;
     const side=Math.floor(rand(0,4));for(let i=0;i<groupSize;i++)spawnEnemy(false,{formation,side,index:i,total:groupSize,role:formation==='flock'?'swarm':null});
   }
   function spawnEnemy(boss=false,entry={}){
