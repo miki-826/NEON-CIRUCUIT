@@ -239,16 +239,18 @@
     dustGeo.setAttribute('position',new T.BufferAttribute(dustPos,3));
     const dust= new T.Points(dustGeo,M(new T.PointsMaterial({color:C.cyan,size:.13,transparent:true,opacity:.33,depthWrite:false})));
     scene.add(dust);
-    scene.add(new T.HemisphereLight(0x7f9ec4,0x05080e,.55));
-    const key=new T.DirectionalLight(0xffe2c2,2.1);key.position.set(-17,42,15);scene.add(key,key.target);
-    const rim=new T.DirectionalLight(0x8ccaff,2.6);rim.position.set(21,19,-30);scene.add(rim);
+    scene.add(new T.HemisphereLight(0x88a8cf,0x09111f,.58));
+    const key=new T.DirectionalLight(0xffe5c8,1.85);key.position.set(-17,42,18);scene.add(key,key.target);
+    const rim=new T.DirectionalLight(0x7acaff,2.35);rim.position.set(22,19,-32);scene.add(rim);
+    const hangarKey=new T.DirectionalLight(0xdceeff,0);hangarKey.position.set(-9,11,16);scene.add(hangarKey);
+    const hangarRim=new T.DirectionalLight(0x59e7ff,0);hangarRim.position.set(14,10,-14);scene.add(hangarRim);
     key.shadow.camera.left=-56;key.shadow.camera.right=56;key.shadow.camera.top=39;key.shadow.camera.bottom=-39;
     key.shadow.camera.near=1;key.shadow.camera.far=110;key.shadow.bias=-.0003;key.shadow.normalBias=.035;
-    const playerLight=new T.PointLight(C.cyan,16,13,2);scene.add(playerLight);
+    const playerLight=new T.PointLight(C.cyan,10,14,2);scene.add(playerLight);
     const bossLight=new T.PointLight(C.red,0,16,2);scene.add(bossLight);
     const blastLights=[];for(let i=0;i<6;i++){const l=new T.PointLight(C.amber,0,18,2);scene.add(l);blastLights.push({light:l,t:0});}
     let pmrem=null, env=null;
-    if(A.RoomEnvironment){try{pmrem=new T.PMREMGenerator(renderer);const room=new A.RoomEnvironment();env=pmrem.fromScene(room,.04);scene.environment=env.texture;scene.environmentIntensity=.38;room.dispose();}catch(_){if(pmrem)pmrem.dispose();pmrem=null;}}
+    if(A.RoomEnvironment){try{pmrem=new T.PMREMGenerator(renderer);const room=new A.RoomEnvironment();env=pmrem.fromScene(room,.04);scene.environment=env.texture;scene.environmentIntensity=.44;room.dispose();}catch(_){if(pmrem)pmrem.dispose();pmrem=null;}}
 
     // Unit geometry is built once per class, with static pieces merged by material.
     // The small flying enemies use three model draws even when the pool reaches 90.
@@ -449,8 +451,37 @@
     // GLBs are embedded as base64 in vendor/models.js (window.NEON_MODELS) so they also load on file://.
     // Until a model has parsed (or if it is missing) the procedural unit below stays visible.
     const gltfCache={}, allUnits=[];
-    const LOWER_BODY=/^(root|hips|thigh|shin|foot)/;
-    const MODEL_SCALE={boss:.8,ranger:1.3,tank:1.25,assassin:1.3,elite:1.1};
+    const LOWER_BODY=/^(root|hips|thigh|shin|foot|skirt)/;
+    const MODEL_SCALE={boss:.8,ranger:1.28,tank:1.18,assassin:1.28,elite:1.1};
+    const CLASS_RIG_SCALE={ranger:1.0,tank:1.12,assassin:.98};
+    const WING_SPEC={
+      ranger:{color:C.cyan,tips:[[1.50,2.36,.90],[-1.50,2.36,.90]],
+        jets:[
+          {bone:'backpack',pos:[.16,1.38,.50],dir:[.14,-.68,.72],r:.11,len:1.05,main:true},
+          {bone:'backpack',pos:[-.16,1.38,.50],dir:[-.14,-.68,.72],r:.11,len:1.05,main:true},
+          {bone:'wing_root.L',pos:[.60,1.80,.62],dir:[.22,-.58,.78],r:.075,len:.82,main:true},
+          {bone:'wing_root.R',pos:[-.60,1.80,.62],dir:[-.22,-.58,.78],r:.075,len:.82,main:true},
+          {bone:'shin.L',pos:[.23,.31,.23],dir:[.10,-.78,.62],r:.072,len:.65,main:false},
+          {bone:'shin.R',pos:[-.23,.31,.23],dir:[-.10,-.78,.62],r:.072,len:.65,main:false}
+        ]},
+      tank:{color:C.amber,tips:[[1.24,2.30,.88],[-1.24,2.30,.88]],
+        jets:[
+          {bone:'wing_root.L',pos:[.56,1.68,.81],dir:[.12,-.68,.72],r:.14,len:1.18,main:true},
+          {bone:'wing_root.L',pos:[.82,1.72,.73],dir:[.26,-.66,.70],r:.12,len:1.05,main:true},
+          {bone:'wing_root.R',pos:[-.56,1.68,.81],dir:[-.12,-.68,.72],r:.14,len:1.18,main:true},
+          {bone:'wing_root.R',pos:[-.82,1.72,.73],dir:[-.26,-.66,.70],r:.12,len:1.05,main:true},
+          {bone:'shin.L',pos:[.28,.31,.33],dir:[.10,-.78,.62],r:.088,len:.72,main:false},
+          {bone:'shin.R',pos:[-.28,.31,.33],dir:[-.10,-.78,.62],r:.088,len:.72,main:false}
+        ]},
+      assassin:{color:C.violet,tips:[[1.58,2.38,1.00],[-1.58,2.38,1.00]],
+        jets:[
+          {bone:'backpack',pos:[.14,1.39,.44],dir:[.15,-.68,.72],r:.095,len:1.18,main:true},
+          {bone:'backpack',pos:[-.14,1.39,.44],dir:[-.15,-.68,.72],r:.095,len:1.18,main:true},
+          {bone:'shin.L',pos:[.20,.31,.19],dir:[.10,-.78,.62],r:.062,len:.62,main:false},
+          {bone:'shin.R',pos:[-.20,.31,.19],dir:[-.10,-.78,.62],r:.062,len:.62,main:false}
+        ]}
+    };
+    function findBone(nodes,name){return nodes[name]||nodes[name.replace(/\./g,'')]||nodes[name.replace(/\./g,'_')]||null;}
     // Named nodes the renderer animates directly; their contents are merged but the nodes themselves are kept.
     const CONTROL_NODES=new Set(['Body','Core','Petals','Wings','Base','Star','StarOuter','Ring1','Ring2','Pylons','Crown']);
     // Blender exports one mesh per armour piece (100+ per robot). Merge them per material so a robot costs a
@@ -514,11 +545,65 @@
           m.userData.neonTuned=true;resources.materials.add(m);
           const n=(m.name||'').toLowerCase();
           // Blender emission strengths (6–14) would blow out under bloom; normalise to the scene's range.
-          if(n.startsWith('glow'))m.emissiveIntensity=id==='elite'?1.3:2.4;
-          else if(n.startsWith('visor'))m.emissiveIntensity=id==='boss'?1.8:id==='drone'?2.2:3.4;
-          else m.envMapIntensity=.9;
+          if(n.startsWith('glowblade')||n.startsWith('glowwing'))m.emissiveIntensity=2.1;
+          else if(n.startsWith('glow'))m.emissiveIntensity=id==='elite'?1.35:2.25;
+          else if(n.startsWith('visor'))m.emissiveIntensity=id==='boss'?1.8:id==='drone'?2.2:2.8;
+          else if(n.startsWith('trim')||n.startsWith('frame')||n.startsWith('nozzle')){
+            if(isHoverPlayer(id)&&m.color)m.color.multiplyScalar(.82);
+            m.envMapIntensity=1.05;
+          }else if(n.startsWith('armor')){
+            if(isHoverPlayer(id)&&m.color)m.color.multiplyScalar(.66);
+            m.envMapIntensity=.75;
+          }else m.envMapIntensity=.85;
         }
       });
+    }
+    const PLUME_GEO=G((()=>{const g=new T.ConeGeometry(1,1,12,1,true);g.rotateX(Math.PI);g.translate(0,-.5,0);return g;})());
+    const PLUME_CAP=G(new T.CircleGeometry(.78,12));
+    const DOWN_V=new T.Vector3(0,-1,0), TIP_W=new T.Vector3();
+    function makeWingTrail(color){
+      const N=20,geo=G(new T.BufferGeometry()),pos=new Float32Array(N*2*3),col=new Float32Array(N*2*4),idx=[];
+      for(let i=0;i<N-1;i++){const k=i*2;idx.push(k,k+1,k+2,k+1,k+3,k+2);}
+      geo.setIndex(idx);geo.setAttribute('position',new T.BufferAttribute(pos,3));geo.setAttribute('color',new T.BufferAttribute(col,4));
+      const mat=M(new T.MeshBasicMaterial({vertexColors:true,transparent:true,blending:T.AdditiveBlending,depthWrite:false,side:T.DoubleSide}));
+      const ribbon=new T.Mesh(geo,mat);ribbon.frustumCulled=false;ribbon.visible=false;scene.add(ribbon);
+      const c=new T.Color(color);
+      return {mesh:ribbon,mat,pos,col,n:N,rgb:[c.r,c.g,c.b],hist:new Float32Array(N*3),primed:false};
+    }
+    function resetWingTrails(v){
+      if(!v?.hoverFX?.trails)return;
+      for(const tr of v.hoverFX.trails){tr.primed=false;tr.mesh.visible=false;}
+    }
+    function attachFlightRig(v){
+      const spec=WING_SPEC[v.type],fx=v.hoverFX;if(!spec||!fx||!v.model)return;
+      const k=(MODEL_SCALE[v.type]||1)*(CLASS_RIG_SCALE[v.type]||1);
+      v.root.updateMatrixWorld(true);
+      // Hide simple fallback cones once bone-locked sculpted thruster plumes attach.
+      for(const j of fx.fallbackJets)j.pod.visible=false;
+      const boneJets=[];
+      for(const cfgJet of spec.jets){
+        const bone=findBone(v.nodes,cfgJet.bone)||v.model;
+        const pod=new T.Group();
+        pod.position.set(cfgJet.pos[0]*k,cfgJet.pos[1]*k,cfgJet.pos[2]*k);
+        DIR.set(cfgJet.dir[0],cfgJet.dir[1],cfgJet.dir[2]).normalize();
+        pod.quaternion.setFromUnitVectors(DOWN_V,DIR);
+        v.tilt.add(pod);v.tilt.updateMatrixWorld(true);
+        bone.attach(pod);
+        const auraJet=mesh(PLUME_GEO,fx.outer,pod),whiteJet=mesh(PLUME_GEO,fx.core,pod);
+        const cap=mesh(PLUME_CAP,fx.core,pod,0,-.02,0);cap.rotation.x=HALF;cap.scale.setScalar(cfgJet.r*.9);
+        boneJets.push({pod,aura:auraJet,core:whiteJet,cap,r:cfgJet.r,len:cfgJet.len,rear:cfgJet.main});
+      }
+      fx.jets=boneJets;
+      // Lock wingtip contrail emitters directly to the animated wing bones!
+      const tipNodes=[];
+      for(let i=0;i<2;i++){
+        const bone=findBone(v.nodes,i===0?'wing_root.L':'wing_root.R')||v.model;
+        const p=spec.tips[i],tip=new T.Object3D();
+        tip.position.set(p[0]*k,p[1]*k,p[2]*k);
+        v.tilt.add(tip);v.tilt.updateMatrixWorld(true);
+        bone.attach(tip);tipNodes.push(tip);
+      }
+      fx.tipNodes=tipNodes;
     }
     function upgradeUnit(v){
       const g=gltfCache[v.type];if(!g||v.model)return;
@@ -528,7 +613,10 @@
       for(const c of v.tilt.children)if(!c.userData.hoverFX)c.visible=false;
       v.tilt.add(model);v.model=model;
       const nodes={};model.traverse(o=>{if(o.name&&!nodes[o.name])nodes[o.name]=o;});
-      v.nodes=nodes;v.chest=nodes.chest||null;
+      v.nodes=nodes;v.chest=findBone(nodes,'chest');v.head=findBone(nodes,'head');
+      v.wingL=findBone(nodes,'wing_root.L');v.wingR=findBone(nodes,'wing_root.R');
+      v.subWingL=findBone(nodes,'wing_sub.L');v.subWingR=findBone(nodes,'wing_sub.R');
+      v.skirtL=findBone(nodes,'skirt.L');v.skirtR=findBone(nodes,'skirt.R');
       if(isHoverPlayer(v.type)&&v.chest)v.chestRest=v.chest.quaternion.clone();
       if(v.type!=='drone'&&v.type!=='hunter'){
         // Few of these exist at once, so they get their own materials for a hit flash.
@@ -545,23 +633,61 @@
         const mixer=new T.AnimationMixer(model),acts={};
         for(const clip of g.animations){
           let c=clip;
-          // Firing only drives the upper body so it layers over the run cycle.
+          // Firing only drives the upper body so it layers cleanly over HoverIdle/HoverFlight or Run.
           if(clip.name==='Fire'){c=clip.clone();c.tracks=c.tracks.filter(t=>!LOWER_BODY.test(t.name.split('.')[0]));}
-          if(!isHoverPlayer(v.type)||clip.name==='Fire')acts[clip.name]=mixer.clipAction(c);
+          if(isHoverPlayer(v.type)){
+            if(['HoverIdle','HoverFlight','Fire','Dash'].includes(clip.name))acts[clip.name]=mixer.clipAction(c);
+          }else{
+            acts[clip.name]=mixer.clipAction(c);
+          }
         }
-        if(!isHoverPlayer(v.type))for(const k of ['Idle','Run','Walk'])if(acts[k]){acts[k].play();acts[k].setEffectiveWeight(k==='Idle'?1:0);}
+        if(isHoverPlayer(v.type)){
+          if(acts.HoverIdle){acts.HoverIdle.play();acts.HoverIdle.setEffectiveWeight(1);}
+          if(acts.HoverFlight){acts.HoverFlight.play();acts.HoverFlight.setEffectiveWeight(0);}
+          if(acts.Dash){acts.Dash.setLoop(T.LoopOnce,1);acts.Dash.clampWhenFinished=false;}
+        }else{
+          for(const k of ['Idle','Run','Walk'])if(acts[k]){acts[k].play();acts[k].setEffectiveWeight(k==='Idle'?1:0);}
+        }
         if(acts.Fire){acts.Fire.setLoop(T.LoopOnce,1);acts.Fire.clampWhenFinished=false;}
-        v.mixer=mixer;v.acts=acts;v.firePlaying=false;v.twist=0;
+        v.mixer=mixer;v.acts=acts;v.firePlaying=false;v.dashPlaying=false;v.twist=0;
       }
+      if(isHoverPlayer(v.type))attachFlightRig(v);
     }
-    function animateModel(v,dt,move,firing,twist){
+    function animateModel(v,dt,move,firing,twist,pose){
       if(!v.mixer)return;
-      const hover=isHoverPlayer(v.type),run=hover?null:v.acts.Run||v.acts.Walk,idle=hover?null:v.acts.Idle,w=clamp(move,0,1);
+      const hover=isHoverPlayer(v.type),w=clamp(move,0,1);
+      if(hover){
+        const hIdle=v.acts.HoverIdle,hFlight=v.acts.HoverFlight,hDash=v.acts.Dash;
+        const speedW=cfg.reducedMotion?0:clamp(pose?.speedNorm||0,0,1);
+        if(hIdle){hIdle.setEffectiveWeight(1-speedW);hIdle.setEffectiveTimeScale(cfg.reducedMotion?0:.85);}
+        if(hFlight){hFlight.setEffectiveWeight(speedW);hFlight.setEffectiveTimeScale(cfg.reducedMotion?0:.95+speedW*.55);}
+        const dashing=!cfg.reducedMotion&&(pose?.boost||0)>.72;
+        if(dashing&&hDash&&!v.dashPlaying){hDash.reset().setEffectiveWeight(1).play();v.dashPlaying=true;}
+        if(!dashing)v.dashPlaying=false;
+        if(firing&&v.acts.Fire&&!v.firePlaying){v.acts.Fire.reset().setEffectiveWeight(1).play();v.firePlaying=true;}
+        if(!firing)v.firePlaying=false;
+        if(!hIdle&&v.chestRest)v.chest.quaternion.copy(v.chestRest);
+        v.mixer.update(dt);
+        // Procedural aero-surface dynamics layered seamlessly atop skeletal flight poses!
+        if(!cfg.reducedMotion&&pose){
+          const extraSweep=clamp((pose.surge||0)*.14+(pose.boost||0)*.24,-.12,.32);
+          const bank=(pose.wingBank||0)*.24;
+          if(v.wingL){v.wingL.rotateZ(-extraSweep);v.wingL.rotateY(bank);}
+          if(v.wingR){v.wingR.rotateZ(extraSweep);v.wingR.rotateY(bank);}
+          if(v.subWingL){v.subWingL.rotateZ(-extraSweep*.7);v.subWingL.rotateY(-bank*.6);}
+          if(v.subWingR){v.subWingR.rotateZ(extraSweep*.7);v.subWingR.rotateY(-bank*.6);}
+          if(v.skirtL)v.skirtL.rotateX(clamp((pose.speedNorm||0)*.18+(pose.boost||0)*.22,0,.38));
+          if(v.skirtR)v.skirtR.rotateX(clamp((pose.speedNorm||0)*.18+(pose.boost||0)*.22,0,.38));
+          if(v.head)v.head.rotateY(clamp((twist||0)*.4-(pose.turn||0)*.28,-.45,.45));
+        }
+        if(v.chest&&twist)v.chest.rotateY(twist);
+        return;
+      }
+      const run=v.acts.Run||v.acts.Walk,idle=v.acts.Idle;
       if(run){run.setEffectiveWeight(w);run.setEffectiveTimeScale(.7+w*.45);}
       if(idle)idle.setEffectiveWeight(1-w);
       if(firing&&v.acts.Fire&&!v.firePlaying){v.acts.Fire.reset().setEffectiveWeight(1).play();v.firePlaying=true;}
       if(!firing)v.firePlaying=false;
-      if(hover&&v.chestRest)v.chest.quaternion.copy(v.chestRest);
       v.mixer.update(dt);
       if(v.chest&&twist)v.chest.rotateY(twist);
     }
@@ -569,10 +695,13 @@
       const src=window.NEON_MODELS;
       if(!src||!A.GLTFLoader||!A.SkeletonUtils)return;
       const loader=new A.GLTFLoader();
-      for(const id of Object.keys(src)){
+      const ids=Object.keys(src);
+      const priority=[...ids.filter(isHoverPlayer),...ids.filter(id=>!isHoverPlayer(id))];
+      const parseOne=id=>{
+        if(disposed||!src[id])return;
         let buffer;
         try{const bin=atob(src[id]),bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);buffer=bytes.buffer;}
-        catch(error){console.warn('NEON model decode failed',id,error);continue;}
+        catch(error){console.warn('NEON model decode failed',id,error);return;}
         loader.parse(buffer,'',gltf=>{
           if(disposed)return;
           try{optimizeModel(gltf.scene);}catch(error){console.warn('NEON model merge skipped',id,error);}
@@ -580,26 +709,34 @@
           gltfCache[id]=gltf;
           for(const v of allUnits)if(v.type===id)upgradeUnit(v);
         },error=>console.warn('NEON model parse failed',id,error));
-      }
+      };
+      for(const id of priority)parseOne(id);
     }
 
     function addHoverFX(v){
       const color=v.type==='tank'?C.amber:v.type==='assassin'?C.violet:C.cyan;
       const rig=new T.Group();rig.userData.hoverFX=true;v.tilt.add(rig);
-      const nozzleGeo=G(new T.CylinderGeometry(.16,.19,.16,12));
-      const flameGeo=G(new T.ConeGeometry(.17,1,12));
-      const nozzleMat=M(material(0x344956,color,.8,.25)),outer=M(glow(color,.48)),core=M(glow(0xedffff,.9));
-      const jets=[];
-      for(const [x,y,z,rear] of [[-.44,.28,.05,false],[.44,.28,.05,false],[-.32,1.25,.68,true],[.32,1.25,.68,true]]){
-        const pod=new T.Group();pod.position.set(x,y,z);if(rear)pod.rotation.x=-HALF;rig.add(pod);
-        mesh(nozzleGeo,nozzleMat,pod);
-        const auraJet=mesh(flameGeo,outer,pod),whiteJet=mesh(flameGeo,core,pod);
-        jets.push({aura:auraJet,core:whiteJet,rear});
+      const outer=M(glow(color,.52)),core=M(glow(0xf2ffff,.94));
+      const fallbackJets=[];
+      for(const [x,y,z,rear] of [[-.28,.40,.22,false],[.28,.40,.22,false],[-.22,1.65,.62,true],[.22,1.65,.62,true]]){
+        const pod=new T.Group();pod.position.set(x,y,z);
+        DIR.set(0,rear?-.68:-.88,rear?.72:.46).normalize();
+        pod.quaternion.setFromUnitVectors(DOWN_V,DIR);rig.add(pod);
+        const auraJet=mesh(PLUME_GEO,outer,pod),whiteJet=mesh(PLUME_GEO,core,pod);
+        const cap=mesh(PLUME_CAP,core,pod,0,-.02,0);cap.rotation.x=HALF;cap.scale.setScalar(.10);
+        fallbackJets.push({pod,aura:auraJet,core:whiteJet,cap,r:rear?.12:.08,len:rear?1.0:.65,rear});
       }
-      // Floor attachments stay on root so lift and banking cannot lift the shadow/rings.
+      // Boost / Quick-Dash Mach shock ring behind dorsal pack
+      const shockMat=M(glow(color,0));
+      const shockRing=mesh(ring,shockMat,rig,0,1.65,.95);shockRing.scale.setScalar(.1);
+      // Floor attachments stay on root so lift and banking cannot lift the shadow/rings/downwash glow.
       v.contact.material=M(shadowMat.clone());
-      const rings=[0,1].map(()=>floorRing(v.root,M(glow(color,.18)),1.4,.045));
-      v.hoverFX={rig,jets,outer,core,rings};
+      const downwash=mesh(disc,M(new T.MeshBasicMaterial({map:contactMap,color,transparent:true,opacity:.24,
+        blending:T.AdditiveBlending,depthWrite:false})),v.root,0,.042,0);
+      downwash.rotation.x=-HALF;downwash.scale.set(2.2,2.2,1);
+      const rings=[0,1].map(()=>floorRing(v.root,M(glow(color,.2)),1.4,.048));
+      const trails=[makeWingTrail(color),makeWingTrail(color)];
+      v.hoverFX={rig,jets:fallbackJets,fallbackJets,outer,core,rings,downwash,shockRing,shockMat,trails,tipNodes:null};
     }
     function unit(type){
       const root=new T.Group(),tilt=new T.Group(),upper=new T.Group();root.add(tilt);tilt.add(upper);scene.add(root);
@@ -860,7 +997,7 @@
     if(A.EffectComposer&&A.RenderPass&&A.OutputPass){
       composer=new A.EffectComposer(renderer);composer.addPass(new A.RenderPass(scene,camera));
       if(A.GTAOPass){try{aoPass=new A.GTAOPass(scene,camera);composer.addPass(aoPass);}catch(_){aoPass=null;}}
-      if(A.UnrealBloomPass){bloomPass=new A.UnrealBloomPass(new T.Vector2(1,1),.6,.45,1.15);composer.addPass(bloomPass);}
+      if(A.UnrealBloomPass){bloomPass=new A.UnrealBloomPass(new T.Vector2(1,1),.48,.42,1.35);composer.addPass(bloomPass);}
       if(A.ShaderPass){gradePass=new A.ShaderPass(gradeShader);composer.addPass(gradePass);}
       if(A.SMAAPass){smaaPass=new A.SMAAPass();composer.addPass(smaaPass);}
       composer.addPass(new A.OutputPass());
@@ -924,6 +1061,7 @@
     function handleEvents(frame){for(const ev of frame.events||[]){
       if(ev.type==='start'){
         particlePool.clear();projectileHistory.clear();fxSeen=new WeakSet();
+        for(const pm of Object.values(playerModels))resetWingTrails(pm);
         for(const v of enemyMap.values())releaseEnemy(v);enemyMap.clear();
         for(const v of retired)releaseEnemy(v);retired.length=0;
         for(const [e,v] of effects){v.object.visible=false;effectPool[v.type].push(v);}effects.clear();
@@ -1028,18 +1166,63 @@
       footprintShadow.instanceMatrix.needsUpdate=true;footprintDrone.instanceMatrix.needsUpdate=true;
       footprintHunter.instanceMatrix.needsUpdate=true;
     }
+    let hangarBlend=0;
+    const CAM_LOOK=new T.Vector3(),CAM_POS=new T.Vector3();
+    function updateWingTrails(v,active,intensity){
+      const fx=v.hoverFX;if(!fx?.trails)return;
+      if(!active||!fx.tipNodes||cfg.reducedMotion||cfg.effectOpacity<=.01){resetWingTrails(v);return;}
+      v.root.updateMatrixWorld(true);
+      const wideBase=(v.type==='tank'?.14:.105)*(.45+intensity*.85);
+      for(let t=0;t<2;t++){
+        const tr=fx.trails[t];
+        fx.tipNodes[t].getWorldPosition(TIP_W);
+        const h=tr.hist,N=tr.n;
+        if(!tr.primed){
+          for(let i=0;i<N;i++){h[i*3]=TIP_W.x;h[i*3+1]=TIP_W.y;h[i*3+2]=TIP_W.z;}
+          tr.primed=true;
+        }else{
+          // If the unit teleported drastically across the map, still draw sleek phase-dash streak; reset only on huge jump.
+          const jump=Math.hypot(TIP_W.x-h[0],TIP_W.z-h[2]);
+          if(jump>38){for(let i=0;i<N;i++){h[i*3]=TIP_W.x;h[i*3+1]=TIP_W.y;h[i*3+2]=TIP_W.z;}}
+          else{
+            for(let i=N-1;i>0;i--){h[i*3]=h[(i-1)*3];h[i*3+1]=h[(i-1)*3+1];h[i*3+2]=h[(i-1)*3+2];}
+            h[0]=TIP_W.x;h[1]=TIP_W.y;h[2]=TIP_W.z;
+          }
+        }
+        const pa=tr.mesh.geometry.attributes.position,ca=tr.mesh.geometry.attributes.color;
+        const [cr,cg,cb]=tr.rgb,aMul=intensity*cfg.effectOpacity;
+        for(let i=0;i<N;i++){
+          const k=i*2,x=h[i*3],y=h[i*3+1],z=h[i*3+2];
+          const ni=Math.min(N-1,i+1)*3;
+          let dx=x-h[ni],dz=z-h[ni+2];const len=Math.hypot(dx,dz);
+          if(len<.001){dx=0;dz=1;}else{dx/=len;dz/=len;}
+          const frac=1-i/(N-1),w=wideBase*frac*frac;
+          const ox=-dz*w,oz=dx*w;
+          pa.setXYZ(k,x-ox,y,z-oz);pa.setXYZ(k+1,x+ox,y,z+oz);
+          const hot=Math.pow(frac,2.4)*.55,a=Math.pow(frac,1.6)*.62*aMul;
+          const r=cr+(1-cr)*hot,g=cg+(1-cg)*hot,b=cb+(1-cb)*hot;
+          ca.setXYZW(k,r,g,b,a);ca.setXYZW(k+1,r,g,b,a);
+        }
+        pa.needsUpdate=true;ca.needsUpdate=true;
+        tr.mesh.visible=aMul>.02;
+      }
+    }
     function syncPlayer(frame,dt){
-      const p=frame.player;if(!p){currentPlayer.root.visible=false;dome.visible=false;return;}
+      const p=frame.player;if(!p){currentPlayer.root.visible=false;resetWingTrails(currentPlayer);dome.visible=false;return;}
       const type=playerModels[frame.classId]?frame.classId:'ranger';
-      if(currentPlayer!==playerModels[type])currentPlayer.root.visible=false;
+      if(currentPlayer!==playerModels[type]){currentPlayer.root.visible=false;resetWingTrails(currentPlayer);}
       currentPlayer=playerModels[type];const v=currentPlayer;v.root.visible=true;
-      const x=wx(p.x,arena.w),z=wz(p.y,arena.h),heading=(p.angle||0)-HALF;
+      const hangar=frame.state==='menu'||frame.state==='master';
+      const x=hangar?0:wx(p.x,arena.w),z=hangar?0:wz(p.y,arena.h),heading=(p.angle||0)-HALF;
       const live=['running','title','menu','master'].includes(frame.state);
-      const pose=window.NeonHover.step(v.hoverPose,p,dt,{live,reducedMotion:cfg.reducedMotion});v.hoverPose=pose;
-      v.root.position.set(x,0,z);v.root.rotation.y=pose.yaw;v.root.scale.setScalar(1.35);
+      const pose=window.NeonHover.step(v.hoverPose,hangar?{x:arena.w/2,y:arena.h/2,vx:0,vy:0,angle:0}:p,dt,{live,reducedMotion:cfg.reducedMotion});v.hoverPose=pose;
+      v.root.position.set(x,0,z);
+      const showcaseYaw=Math.PI+.48+(cfg.reducedMotion?0:Math.sin(elapsed*.42)*.26);
+      v.root.rotation.y=hangar?showcaseYaw:pose.yaw;
+      v.root.scale.setScalar(1.35);
       v.ground.scale.setScalar((p.r||14)/13.5);
       v.tilt.position.set(0,pose.height,p.recoilUntil>frame.time?.12:0);
-      v.tilt.rotation.set(pose.pitch,0,pose.roll);
+      v.tilt.rotation.set(hangar?0:pose.pitch,0,hangar?0:pose.roll);
       v.body.material=unitMats[type].shell;v.flash.visible=!v.model&&p.inv>0&&Math.floor(elapsed*16)%2===0;
       // Procedural fallback has a relaxed tucked stance, never a walking gait.
       if(v.legs)for(const leg of v.legs)leg.rotation.set(-.10,0,0);
@@ -1048,28 +1231,52 @@
       v.upper.rotation.y=0;
       if(Array.isArray(v.thrust))for(const jet of v.thrust)jet.visible=false;
       const fx=v.hoverFX;
-      for(const jet of fx.jets){
-        const length=(jet.rear?.22:.28)+pose.thrust*(jet.rear?.85:.48);
-        jet.aura.scale.set(1+pose.thrust*.25,length,1+pose.thrust*.25);jet.aura.position.y=-.09-length*.5;
-        jet.core.scale.set(.42,length*.75,.42);jet.core.position.y=-.09-length*.375;
+      const flicker=cfg.reducedMotion?1:.92+.14*Math.sin(elapsed*44)+.06*Math.cos(elapsed*71);
+      const thrustPower=hangar?.36:pose.thrust;
+      for(let i=0;i<fx.jets.length;i++){
+        const jet=fx.jets[i],f=cfg.reducedMotion?1:flicker+(i%2?.04:-.04);
+        const len=(jet.len||.9)*(.32+thrustPower*(jet.rear?.88:.52)+(pose.boost||0)*.75)*f;
+        const rad=(jet.r||.11)*(1+thrustPower*.22+(pose.boost||0)*.28);
+        jet.aura.scale.set(rad,len,rad);
+        jet.core.scale.set(rad*.46,len*.72,rad*.46);
+        if(jet.cap)jet.cap.scale.setScalar(rad*(.85+thrustPower*.15));
       }
-      fx.outer.opacity=.35+pose.thrust*.28;fx.core.opacity=.72+pose.thrust*.2;
+      fx.outer.opacity=.38+clamp(thrustPower,0,1.2)*.34;fx.core.opacity=.78+clamp(thrustPower,0,1.2)*.2;
+      if(fx.shockRing){
+        const b=hangar?0:(pose.boost||0);
+        fx.shockRing.visible=b>.04&&!cfg.reducedMotion;
+        if(fx.shockRing.visible){
+          const prog=1-b;
+          fx.shockRing.scale.setScalar(.55+prog*2.2);
+          fx.shockRing.position.set(0,1.65,.9+prog*1.4);
+          fx.shockMat.opacity=b*.68*cfg.effectOpacity;
+        }
+      }
       for(let i=0;i<fx.rings.length;i++){
         const phase=cfg.reducedMotion?i*.5:(pose.time*.65+i*.5)%1;
-        fx.rings[i].scale.setScalar(1.15+phase*(.65+pose.thrust*.5));
-        fx.rings[i].material.opacity=(1-phase)*(.09+pose.thrust*.12);
+        fx.rings[i].scale.setScalar(1.18+phase*(.72+thrustPower*.52));
+        fx.rings[i].material.opacity=(1-phase)*(.10+thrustPower*.14);
+      }
+      if(fx.downwash){
+        fx.downwash.scale.setScalar(2.1+thrustPower*.65);
+        fx.downwash.material.opacity=.18+thrustPower*.18;
       }
       v.contact.scale.set(2.7,2.7,1);v.contact.material.opacity=.62;
       if(v.model){
-        const firing=p.recoilUntil>frame.time;
+        const firing=!hangar&&p.recoilUntil>frame.time;
         const diff=firing?window.NeonHover.wrap((p.recoilAngle||0)-heading):0;
-        if(live)v.twist=lerp(v.twist||0,clamp(-diff,-.9,.9),smooth(14,dt));
-        animateModel(v,live?dt:0,0,firing,v.twist);
-        if(v.flashMats){const on=p.inv>0&&Math.floor(elapsed*16)%2===0;for(const m of v.flashMats)m.emissiveIntensity=on?.4:0;}
+        if(live)v.twist=hangar?0:lerp(v.twist||0,clamp(-diff,-.9,.9),smooth(14,dt));
+        animateModel(v,live?dt:0,0,firing,v.twist,hangar?{speedNorm:0,surge:0,boost:0,wingBank:0,turn:0}:pose);
+        if(v.flashMats){const on=!hangar&&p.inv>0&&Math.floor(elapsed*16)%2===0;for(const m of v.flashMats)m.emissiveIntensity=on?.4:0;}
       }
-      playerLight.intensity=16+pose.thrust*7;playerLight.position.set(x,2.2,z);playerLight.color.set(frame.classColor||'#59e7ff');
-      dome.visible=!!(p.guardUntil>frame.time);dome.position.set(x,1.3,z);
-      const orb=frame.orbit;for(let i=0;i<orbitMeshes.length;i++){
+      const trailIntensity=hangar?0:clamp((pose.speedNorm||0)*.92+Math.abs(pose.turn||0)*.4+(pose.boost||0)*.9,0,1.35);
+      updateWingTrails(v,frame.state==='running'&&live,trailIntensity);
+      playerLight.intensity=9+thrustPower*5+(hangar?2:0);playerLight.position.set(x,hangar?1.15:1.1,z+(hangar?1.2:0));playerLight.color.set(frame.classColor||'#59e7ff');
+      hangarKey.intensity=lerp(hangarKey.intensity,hangar?.95:0,smooth(7,dt));
+      hangarRim.intensity=lerp(hangarRim.intensity,hangar?1.25:0,smooth(7,dt));
+      hangarRim.color.set(frame.classColor||'#59e7ff');
+      dome.visible=!hangar&&!!(p.guardUntil>frame.time);dome.position.set(x,1.3,z);
+      const orb=hangar?null:frame.orbit;for(let i=0;i<orbitMeshes.length;i++){
         const b=orbitMeshes[i];b.visible=!!orb&&i<orb.count;if(!b.visible)continue;
         const a=frame.time*2.8+i*TAU/orb.count,r=orb.radius/10;
         b.position.set(x+Math.cos(a)*r,1.1,z+Math.sin(a)*r);b.rotation.set(.5,-a,0);b.scale.set(.85,1.05,.85);
@@ -1106,11 +1313,14 @@
     }
     function updateCamera(frame,dt){
       const aspect=width/height, fov=camera.fov*Math.PI/180,pitch=50*Math.PI/180;
+      const hangar=frame.state==='menu'||frame.state==='master';
+      if(frameId===1)hangarBlend=hangar?1:0;
+      else hangarBlend=lerp(hangarBlend,hangar?1:0,cfg.reducedMotion?1:smooth(5.5,dt));
       const full=cfg.follow===false||!frame.player;
       const widthNeeded=full?worldW*1.07:aspect<1?worldH*aspect:55*(frame.bossActive?1.15:1);
       const heightNeeded=full?worldH*1.23:aspect<1?worldH*1.08:0;
       const dist=Math.max(widthNeeded/(2*Math.tan(fov/2)*aspect),heightNeeded*Math.sin(pitch)/(2*Math.tan(fov/2)));
-      let tx=0,tz=0;if(!full&&frame.player){
+      let tx=0,tz=0;if(!full&&frame.player&&!hangar){
         const p=frame.player,speed=Math.hypot(p.vx||0,p.vy||0),lead=Math.min(5,speed/45);
         tx=wx(p.x,arena.w)+(speed>1?(p.vx/speed)*lead:0);
         tz=wz(p.y,arena.h)+(speed>1?(p.vy/speed)*lead:0);
@@ -1121,10 +1331,24 @@
         tz=clamp(tz,-worldH/2+15,worldH/2-15);
       }
       camTarget.x=lerp(camTarget.x,tx,smooth(5,dt));camTarget.z=lerp(camTarget.z,tz,smooth(5,dt));
-      const idle=frame.state==='title'||frame.state==='menu'||frame.state==='master';
+      const idle=frame.state==='title'||hangar;
       const orbit=idle&&!cfg.reducedMotion?Math.sin(elapsed*.18)*.12:0;
-      let sx=0,sy=0,sz=0;if(trauma>0&&cfg.shake&&!cfg.reducedMotion){const power=trauma*trauma; sx=Math.sin(elapsed*61)*power;sy=Math.sin(elapsed*73+.8)*power*.5;sz=Math.sin(elapsed*67+1.7)*power;}
-      camera.position.set(camTarget.x+Math.sin(orbit)*dist*.4+sx,Math.sin(pitch)*dist+sy,camTarget.z+Math.cos(pitch)*dist+sz);
+      let sx=0,sy=0,sz=0;if(trauma>0&&cfg.shake&&!cfg.reducedMotion&&!hangar){const power=trauma*trauma; sx=Math.sin(elapsed*61)*power;sy=Math.sin(elapsed*73+.8)*power*.5;sz=Math.sin(elapsed*67+1.7)*power;}
+      const cPosX=camTarget.x+Math.sin(orbit)*dist*.4+sx,cPosY=Math.sin(pitch)*dist+sy,cPosZ=camTarget.z+Math.cos(pitch)*dist+sz;
+      if(hangarBlend>.002){
+        // AAA Cinematic 3D Hangar Showcase Camera: full-frame heroic 3/4 showcase showing head crest, wingspan, weapons and hover rings cleanly.
+        const wide=aspect>=1.18;
+        const hDist=wide?11.5:13.2,hShiftX=wide?2.55:0,hLookY=wide?2.32:2.10;
+        const sway=cfg.reducedMotion?0:Math.sin(elapsed*.32)*.55;
+        CAM_POS.set(hShiftX+sway,3.35,hDist);
+        CAM_LOOK.set(hShiftX,hLookY,0);
+        const t=hangarBlend*hangarBlend*(3-2*hangarBlend);
+        camera.position.set(lerp(cPosX,CAM_POS.x,t),lerp(cPosY,CAM_POS.y,t),lerp(cPosZ,CAM_POS.z,t));
+        look.set(lerp(camTarget.x,CAM_LOOK.x,t),lerp(0,CAM_LOOK.y,t),lerp(camTarget.z,CAM_LOOK.z,t));
+        camera.lookAt(look);
+        return;
+      }
+      camera.position.set(cPosX,cPosY,cPosZ);
       look.set(camTarget.x,0,camTarget.z);camera.lookAt(look);
     }
     function render(frame){

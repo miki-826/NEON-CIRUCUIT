@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | `vendor/three.bundle.js` | three.jsと同梱アドオン | `vendor/three-LICENSE.txt` のMITライセンスを保持 |
 | `assets/fonts/` | Michroma、Zen Kaku Gothic New | 同梱する各OFL文書を保持 |
-| `assets/units/`、`assets/skills/`、`assets/cover.png`、`assets/arena.webp`、`assets/reactor.webp` | 画像生成ツールで制作 | 追加・差し替え時は生成元と条件を記録 |
-| `vendor/models.js` | Blenderスクリプトで組み立てたロボットのGLBを埋め込み | 生成コードは `tools/robots/`、再生成したファイルも同じPRで更新 |
+| `assets/units/drone.webp`、`elite.webp`、`boss.webp`、`assets/skills/`、`assets/cover.png`、`assets/arena.webp`、`assets/reactor.webp` | 画像生成ツールで制作 | 追加・差し替え時は生成元と条件を記録 |
+| `vendor/models.js`、`assets/units/ranger.webp`、`tank.webp`、`assassin.webp` | Blenderスクリプトで組み立てたロボットのGLB埋め込みおよびスタジオレンダリング画像 | 生成コードは `tools/robots/`、再生成したファイルも同じPRで更新 |
 | `assets/movie/opening.mp4`、`title-loop.mp4` | Claude側で制作されたオープニングとタイトル背景。Blenderでの描画、生成画像、合成音声を使用 | 完成したゲーム用動画を収録。Blenderの制作環境・全中間素材はこのリポジトリに含まれない |
 | 動画中の地球画像 | 既存制作メモではNASA Visible EarthのBlue Marble・夜景をWikimedia Commons経由で使用 | 元の取得URLや素材単位の記録は管理者が補完。新規取得する素材もURLと条件を記録 |
 | `assets/audio/Metal_and_Nerve.mp3` | ユーザー提供曲「Metal and Nerve」 | 提供ファイルを収録。第三者が別の作品で利用できるライセンスは、このリポジトリでは付与しない。作者・再配布条件の記録は管理者が補完 |

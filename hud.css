@@ -416,13 +416,110 @@ body { font-family: var(--h-font-jp); }
   border-radius: 0; background: rgba(18, 32, 52, .9); border-color: var(--h-line-bright);
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
-.choice:hover, .choice:focus-visible { background: rgba(22, 52, 74, .95); border-color: var(--h-signal); }
+.choice:hover, .choice:focus-visible, .choice.is-active { background: rgba(22, 52, 74, .95); border-color: var(--h-signal); }
+.choice.is-active { box-shadow: inset 0 0 0 1px rgba(89, 231, 255, .35), 0 0 22px rgba(89, 231, 255, .14); }
 .choice strong { font-size: 16px; }
 .choice p { font-size: 13px; }
 .choice .choice-kicker, .choice .choice-bottom { font-family: var(--h-font-display); font-weight: 400; font-size: 10px; letter-spacing: .08em; }
 .choice-art { border-radius: 0; }
 .mode-button { border-radius: 0; font-size: 13px; min-height: 44px; }
 .result-number { font-family: var(--h-font-display); font-weight: 400; font-size: 44px; }
+
+/* ---- AAA 3D Interactive Hangar Showcase Layout ----------------------- */
+.overlay.is-hangar {
+  background: linear-gradient(90deg, rgba(4, 9, 18, .06) 0%, rgba(4, 9, 18, .18) 42%, rgba(4, 9, 18, .80) 64%, rgba(4, 9, 18, .92) 100%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  justify-items: end;
+  align-items: center;
+  padding: 24px 36px;
+}
+.overlay.is-hangar .overlay-panel {
+  width: min(640px, 52vw);
+  background: rgba(8, 15, 28, .86);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-color: rgba(89, 231, 255, .42);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .65);
+}
+.overlay.is-hangar .hero { height: 136px; padding: 20px 26px; }
+.overlay.is-hangar .hero h2 { font-size: clamp(24px, 3vw, 38px); }
+.overlay.is-hangar .overlay-content { padding: 20px 24px 24px; }
+.overlay.is-hangar .overlay-title { font-size: 20px; margin-bottom: 5px; }
+.overlay.is-hangar .overlay-desc { font-size: 13px; margin-bottom: 14px; }
+.overlay.is-hangar .choice { min-height: 136px; padding: 12px; }
+.overlay.is-hangar .class-art { height: 74px; margin-bottom: 8px; }
+.hangar-badge {
+  position: fixed;
+  left: clamp(22px, 3.6vw, 52px);
+  bottom: clamp(24px, 4.5vh, 52px);
+  width: min(320px, 38vw);
+  padding: 16px 20px;
+  pointer-events: none;
+  background: rgba(6, 13, 25, .74);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(118, 168, 210, .35);
+  border-left: 3px solid var(--unit-color, var(--h-signal));
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, .55);
+}
+.hangar-kicker {
+  display: block;
+  font: 400 10px/1.3 var(--h-font-display);
+  letter-spacing: .12em;
+  color: var(--unit-color, var(--h-signal));
+}
+.hangar-code {
+  display: block;
+  margin-top: 5px;
+  font: 400 20px/1.2 var(--h-font-display);
+  letter-spacing: .08em;
+  color: var(--h-star);
+  text-shadow: 0 0 18px rgba(89, 231, 255, .35);
+}
+.hangar-name {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--h-dim);
+}
+.hangar-bars {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.hangar-bars > div {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: center;
+  gap: 8px;
+  font: 400 10px/1 var(--h-font-display);
+  color: var(--h-dim);
+}
+.hangar-bars i {
+  display: block;
+  height: 5px;
+  background: rgba(140, 175, 210, .16);
+  overflow: hidden;
+}
+.hangar-bars b {
+  display: block;
+  height: 100%;
+  background: var(--unit-color, var(--h-signal));
+  box-shadow: 0 0 10px var(--unit-color, var(--h-signal));
+  transition: width .24s ease;
+}
+@media (max-width: 960px) {
+  .overlay.is-hangar {
+    background: linear-gradient(180deg, rgba(4, 9, 18, .12) 0%, rgba(4, 9, 18, .72) 48%, rgba(4, 9, 18, .92) 100%);
+    justify-items: center;
+    align-items: end;
+    padding: 16px;
+  }
+  .overlay.is-hangar .overlay-panel { width: min(760px, 100%); }
+  .hangar-badge { display: none; }
+}
 
 /* ---- Responsive -------------------------------------------------------- */
 @media (max-width: 1279px) {
