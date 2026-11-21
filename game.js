@@ -51,9 +51,9 @@
   const rand = (a,b) => a + Math.random() * (b-a);
   const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
   const classes = [
-    {id:'ranger',name:'レンジャー',kicker:'LONG RANGE',desc:'遠距離攻撃に特化。耐久は低めで、移動速度は標準。',hp:85,atk:1.12,def:0.86,speed:205,color:'#5eeaff'},
-    {id:'tank',name:'タンク',kicker:'FRONT LINE',desc:'近距離で押し切る高防御型。移動速度は標準。',hp:155,atk:1,def:1.75,speed:190,color:'#ffcc7c'},
-    {id:'assassin',name:'アサシン',kicker:'HIGH MOBILITY',desc:'素早く動き、敵の間をすり抜ける高機動型。',hp:95,atk:1.08,def:1,speed:270,color:'#b28aff'}
+    {id:'ranger',code:'AX-07 VALKYRIE',name:'レンジャー',kicker:'LONG RANGE',desc:'遠距離攻撃に特化。耐久は低めで、移動速度は標準。',hp:85,atk:1.12,def:0.86,speed:205,color:'#5eeaff'},
+    {id:'tank',code:'BG-09 AEGIS',name:'タンク',kicker:'FRONT LINE',desc:'近距離で押し切る高防御型。移動速度は標準。',hp:155,atk:1,def:1.75,speed:190,color:'#ffcc7c'},
+    {id:'assassin',code:'PX-11 SERAPH',name:'アサシン',kicker:'HIGH MOBILITY',desc:'素早く動き、敵の間をすり抜ける高機動型。',hp:95,atk:1.08,def:1,speed:270,color:'#b28aff'}
   ];
   const masters = [
     {id:'pulse',name:'パルスショット',desc:'最も近い敵へ高精度の弾を発射。',cost:36,damage:17,kind:'main'},
@@ -104,14 +104,32 @@
   const colorOf = skill => skill.kind==='main'?'#59e7ff':skill.kind==='passive'?'#aa82ff':'#ffcf79';
   function pick(list,n){return [...list].sort(()=>Math.random()-.5).slice(0,n)}
   function log(msg){$('feed').textContent=msg; if(state==='paused') $('buildHint').textContent=msg;}
-  function show(html){
-    const panel = $('overlayPanel');
+  function syncHangarBadge(visible){
+    const overlay = $('overlay');
+    let badge = $('hangarBadge');
+    if (!visible || !renderer3d) { badge?.remove?.(); return; }
+    if (!badge && typeof document.createElement === 'function') {
+      badge = document.createElement('aside');
+      badge.id = 'hangarBadge';
+      badge.className = 'hangar-badge';
+      overlay.append?.(badge);
+    }
+    if (!badge) return;
+    const u = selectedClass;
+    badge.style.setProperty?.('--unit-color', u.color);
+    badge.innerHTML = `<span class="hangar-kicker">ORBITAL HOVER FRAME // ${u.kicker}</span><strong class="hangar-code">${u.code}</strong><span class="hangar-name">${u.name}</span><div class="hangar-bars"><div><span>HP</span><i><b style="width:${Math.round(u.hp/160*100)}%"></b></i></div><div><span>DEF</span><i><b style="width:${Math.round(u.def/1.85*100)}%"></b></i></div><div><span>SPD</span><i><b style="width:${Math.round(u.speed/280*100)}%"></b></i></div></div>`;
+  }
+  function show(html, options = {}){
+    const overlay = $('overlay'), panel = $('overlayPanel');
     panel.innerHTML=html;
     panel.querySelector('h2, h3').id='overlayTitle';
-    $('overlay').classList.remove('hidden');
-    $('overlay').scrollTop=0;
+    const isHangar = Boolean(options.hangar && renderer3d);
+    overlay.classList.toggle('is-hangar', isHangar);
+    syncHangarBadge(isHangar);
+    overlay.classList.remove('hidden');
+    overlay.scrollTop=0;
   }
-  function hide(){ $('overlay').classList.add('hidden') }
+  function hide(){ $('overlay').classList.add('hidden'); $('overlay').classList.remove('is-hangar'); syncHangarBadge(false); }
   // Reflects persisted settings + audio mute state onto the settings page controls.
   function syncSettingsUI(){
     $('effectOpacity').value=Math.round(settings.effectOpacity*100);
@@ -277,9 +295,17 @@
       else if (!event.shiftKey && document.activeElement===last) { event.preventDefault(); first.focus(); }
     });
   }
-  function classCards(){return classes.map(c=>`<button class="choice class-choice" data-class="${c.id}"><img class="class-art" src="${artPath('units',c.id)}" alt=""><span class="choice-kicker">${c.kicker}</span><strong>${c.name}</strong><p>${c.desc}<br>初期サブスキル：${subs.find(s=>s.id===starterSkills[c.id]).name}</p><span class="choice-bottom">HP ${c.hp} / DEF ${c.def.toFixed(2)} / SPD ${c.speed}</span></button>`).join('')}
-  function menu(){state='menu';show(`<div class="hero"><div><h2>NEON <span>CIRCUIT</span></h2><p>軌道施設アークより救難信号。防衛網を突破せよ。</p></div></div><div class="overlay-content"><h3 class="overlay-title">戦闘ユニットを選択</h3><p class="overlay-desc">軌道施設に取り残された住民を救出する。ノードで自動攻撃を組み替え、10ウェーブを突破せよ。</p><div class="choice-grid">${classCards()}</div><div class="mode-row">${Object.entries(modeDefs).map(([id,m])=>`<button class="mode-button ${id===mode?'active':''}" data-mode="${id}">${m.label}</button>`).join('')}</div><p class="note">ラッシュは敵部隊を全滅させると即座に次のラウンドへ。約1時間と指定時間モードでも、ラウンド開始から敵が出現します。</p></div>`);document.querySelectorAll('[data-class]').forEach(b=>b.onclick=()=>{selectedClass=classes.find(c=>c.id===b.dataset.class);masterChoice()});document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;menu()})}
-  function masterChoice(){choices=pick(masters,3);state='master';show(`<div class="hero"><div><h2>MASTER <span>SKILL</span></h2><p>${selectedClass.name}の主回路を設定</p></div></div><div class="overlay-content"><h3 class="overlay-title">マスタースキルを1つ選択</h3><p class="overlay-desc">攻撃の中心になるスキルです。消費コストが満たされるたび自動発動します。</p><div class="choice-grid">${choices.map((s,i)=>card(s,i,'MASTER')).join('')}</div><button class="primary-action" id="backClass">クラス選択へ戻る</button></div>`);document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>start(choices[+b.dataset.choice]));$('backClass').onclick=menu}
+  function classCards(){return classes.map(c=>`<button class="choice class-choice ${c.id===selectedClass.id?'is-active':''}" data-class="${c.id}"><img class="class-art" src="${artPath('units',c.id)}" alt=""><span class="choice-kicker">${c.code} · ${c.kicker}</span><strong>${c.name}</strong><p>${c.desc}<br>初期サブスキル：${subs.find(s=>s.id===starterSkills[c.id]).name}</p><span class="choice-bottom">HP ${c.hp} / DEF ${c.def.toFixed(2)} / SPD ${c.speed}</span></button>`).join('')}
+  function previewClass(id){
+    const next=classes.find(c=>c.id===id);
+    if(!next||next===selectedClass)return;
+    selectedClass=next;
+    document.querySelectorAll('[data-class]').forEach(el=>el.classList.toggle('is-active',el.dataset.class===id));
+    syncHangarBadge(true);
+    play('ui-move',.18);
+  }
+  function menu(){state='menu';show(`<div class="hero"><div><h2>NEON <span>CIRCUIT</span></h2><p>軌道施設アークより救難信号。防衛網を突破せよ。</p></div></div><div class="overlay-content"><h3 class="overlay-title">戦闘ユニットを選択</h3><p class="overlay-desc">軌道施設に取り残された住民を救出する。機体を選択して3Dホバーフレームを確認し、10ウェーブを突破せよ。</p><div class="choice-grid">${classCards()}</div><div class="mode-row">${Object.entries(modeDefs).map(([id,m])=>`<button class="mode-button ${id===mode?'active':''}" data-mode="${id}">${m.label}</button>`).join('')}</div><p class="note">ラッシュは敵部隊を全滅させると即座に次のラウンドへ。約1時間と指定時間モードでも、ラウンド開始から敵が出現します。</p></div>`,{hangar:true});document.querySelectorAll('[data-class]').forEach(b=>{b.onpointerenter=()=>previewClass(b.dataset.class);b.onfocus=()=>previewClass(b.dataset.class);b.onclick=()=>{selectedClass=classes.find(c=>c.id===b.dataset.class);masterChoice()}});document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;menu()})}
+  function masterChoice(){choices=pick(masters,3);state='master';show(`<div class="hero"><div><h2>MASTER <span>SKILL</span></h2><p>${selectedClass.code} / ${selectedClass.name}の主回路を設定</p></div></div><div class="overlay-content"><h3 class="overlay-title">マスタースキルを1つ選択</h3><p class="overlay-desc">攻撃の中心になるスキルです。消費コストが満たされるたび自動発動します。</p><div class="choice-grid">${choices.map((s,i)=>card(s,i,'MASTER')).join('')}</div><button class="primary-action" id="backClass">クラス選択へ戻る</button></div>`,{hangar:true});document.querySelectorAll('[data-choice]').forEach(b=>b.onclick=()=>start(choices[+b.dataset.choice]));$('backClass').onclick=menu}
   function card(option,index,kicker){
     const isNode = option.choiceKind === 'node';
     const art = isNode ? '' : `<img class="choice-art" src="${artPath('skills',option.id)}" alt="">`;
